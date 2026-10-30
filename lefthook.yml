@@ -1,0 +1,16 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: typecheck
+      run: pnpm typecheck
+    - name: lint
+      glob: "*.{ts,tsx,css,json}"
+      run: pnpm biome lint --no-errors-on-unmatched {staged_files}
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: test
+      run: pnpm test
+    - name: build
+      run: pnpm build

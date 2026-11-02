@@ -689,18 +689,18 @@ export function useWakeGhost(project: string) {
   })
 }
 
-/** Worktrees des tickets qui viennent d'être créés, l'un après l'autre (chacun touche au dépôt). */
+/**
+ * Worktrees des tickets qui viennent d'être créés : pour chaque ticket, un worktree par dépôt touché, liés entre eux.
+ * Les tickets sont traités l'un après l'autre (chacun touche aux dépôts).
+ */
 export function useCreateTicketWorktrees(project: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (items: { ticketId: string; branch: string; base: string }[]) => {
-      const created: { ticketId: string; id: string }[] = []
-      for (const it of items) {
-        const r = await api<{ id: string; path: string }>(`/projects/${project}/worktrees`, { body: { mode: 'ticket', branch: it.branch, base: it.base, ticketId: it.ticketId } })
-        created.push({ ticketId: it.ticketId, id: r.id })
-      }
+    mutationFn: async (tickets: { ticketId: string; branch: string; projects: string[] }[]) => {
+      const created: { project: string; id: string }[] = []
+      for (const t of tickets) created.push(...(await api<{ project: string; id: string }[]>(`/projects/${project}/ticket-worktrees`, { body: t })))
       return created
     },
-    onSettled: () => syncProject(qc, project),
+    onSettled: (_r, _e, tickets) => Promise.all([...new Set(tickets.flatMap((t) => t.projects))].map((p) => syncProject(qc, p))),
   })
 }

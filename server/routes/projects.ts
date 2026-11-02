@@ -148,3 +148,7 @@ projectsRoutes.delete('/projects/:id/ghosts/:key', (c) => {
   removeGhost(getProject(c.req.param('id')).id, c.req.param('key'))
   return c.json({ ok: true })
 })
+
+/** Worktrees d'un ticket créé depuis « Nouveau ticket », un par dépôt touché, liés entre eux. */
+projectsRoutes.post('/projects/:id/ticket-worktrees', async (c) =>
+  c.json(await svc.createTicketWorktrees(getProject(c.req.param('id')), await jsonBody(c, inputs.ticketWorktreesInput))))

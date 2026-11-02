@@ -314,6 +314,29 @@ export async function worktreeDetail(project: Project, wtId: string, force = fal
   return { project, worktree, ticket, pr, commitsAhead, dirtyFiles, merge, behindBase, linked, tests: testsSummary(wtId), selfReview: selfReviewSummary(wtId) }
 }
 
+/**
+ * Worktrees d'un ticket qui touche plusieurs dépôts du même groupe : un par projet, même branche, chacun depuis sa
+ * base, puis liés entre eux pour que plan, travail et review portent sur l'ensemble. Un worktree déjà créé pour ce
+ * ticket dans un projet est repris tel quel.
+ */
+export async function createTicketWorktrees(project: Project, input: { ticketId: string; branch: string; projects: string[] }): Promise<{ project: string; id: string }[]> {
+  const targets = [...new Set(input.projects)].map(getProject)
+  if (!targets.length) throw new HttpError(400, 'Aucun projet choisi')
+  for (const t of targets) {
+    if (t.id !== project.id && (!project.group || t.group !== project.group)) throw new HttpError(400, `${t.name} n’est pas dans le groupe de ${project.name} (Réglages › Projets liés)`)
+  }
+  const out: { project: string; id: string; path: string }[] = []
+  for (const t of targets) {
+    const existing = (await overview(t)).worktrees.find((w) => w.ticketId === input.ticketId)
+    const wt = existing ?? (await createWorktree(t, { mode: 'ticket', branch: input.branch, base: t.baseBranch, ticketId: input.ticketId }))
+    out.push({ project: t.id, id: wt.id, path: wt.path })
+  }
+  const [first, ...rest] = out
+  for (const r of rest) linkWorktrees({ project: first.project, path: first.path }, { project: r.project, path: r.path })
+  for (const t of targets) overviews.delete(t.id)
+  return out.map(({ project, id }) => ({ project, id }))
+}
+
 export async function createWorktree(project: Project, input: CreateWorktreeInput): Promise<{ path: string; id: string }> {
   let dir: string
   let branch: string

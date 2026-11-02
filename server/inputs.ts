@@ -162,6 +162,7 @@ export const ciRerunInput = z.object({ runId: id, jobId: optional(z.string()) })
 export const openFileInput = z.object({ file: z.string().optional() })
 export const runDecisionInput = z.object({ decision: z.enum(['approved', 'declined']), discard: z.boolean().optional() })
 export const textInput = z.object({ text: z.string() })
+export const ticketWorktreesInput = z.object({ ticketId: id, branch: z.string().regex(/^[\w./-]+$/), projects: z.array(id).min(1) })
 export const ghostInput = z.object({ note: z.string().max(500).nullable().optional() })
 export const statsQuery = z
   .object({ from: isoDay, to: isoDay, scope: z.enum(['tracked', 'all']).default('tracked') })

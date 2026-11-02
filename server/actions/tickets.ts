@@ -205,6 +205,7 @@ export const ticketsProjectActions: ProjectActions = {
         rules: rulesFor(project.id),
         labels: meta.labels.map((l) => l.name).join(', ') || '(none)',
         projects: meta.projects.map((p) => p.name).join(', ') || '(none)',
+        repos: [project, ...grouped].map((p) => p.name).join(', '),
       }, {
         kind, title: feedback ? 'Affinage des tickets' : 'Rédaction des tickets', scope: { project: project.id, ref: 'ticket-draft' }, cwd: project.path,
         schema: schemas.ticketDraftSchema, addDirs: [...grouped, ...others].map((p) => p.path),

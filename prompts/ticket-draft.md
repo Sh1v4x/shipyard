@@ -2,7 +2,7 @@
 name: Rédiger des tickets Linear
 group: Linear
 when: Barre du haut › Nouveau ticket › Analyser le projet (puis Affiner)
-vars: [project.name, repo, base, branch, feature, previous, feedback, others, rules, labels, projects, linked, lang.app, lang.tickets]
+vars: [project.name, repo, base, branch, feature, previous, feedback, others, rules, labels, projects, linked, repos, lang.app, lang.tickets]
 allowedTools: [Read, Grep, Glob, Agent, Bash(git log *), Bash(git show *), Bash(git ls-files *), Bash(ls *)]
 ---
 
@@ -97,6 +97,7 @@ Add "Dépend de : <titre de l’autre ticket>" under the Référent line when ap
 - priority: 3 (normal) by default, 2 if the request says it is urgent or blocking.
 - project: the matching Linear project, from those below, otherwise null.
 - branch: 2 to 4 English words in kebab-case that name the change, for the git branch (e.g. `bank-sync-retry`).
+- repos: the repositories this ticket changes, by name exactly as listed: {repos}. A worktree is created in each of them, on the same branch.
 
 Existing labels: {labels}
 

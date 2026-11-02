@@ -10,8 +10,8 @@ import { Label as FieldLabel } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { useCreateLinearIssues, useCreateTicketWorktrees, useCreateWorktree } from '../data/mutations.ts'
-import { useCreatedTickets, useLinearMeta, useProjectOverview, useProjects } from '../data/queries.ts'
+import { useCreateLinearIssues, useCreateTicketWorktrees } from '../data/mutations.ts'
+import { useCreatedTickets, useLinearMeta, useProjectOverviews, useProjects } from '../data/queries.ts'
 import { useAction } from '../data/runs.ts'
 import { go, href } from '../router.ts'
 import { Badge, ErrorBox, Pill, PromptMenu, RunPanel, Spinner, plural, useToast } from '../ui.tsx'
@@ -29,6 +29,8 @@ interface Form {
   priority: number
   labelIds: string[]
   projectId: string | null
+  /** Projets (ids) où créer un worktree pour ce ticket : celui de la page et/ou ses projets liés. */
+  repos: string[]
 }
 
 /** Petit stockage par navigateur : brouillon de la feature et réglages en cours, pour survivre à un rechargement. */
@@ -49,7 +51,7 @@ function useStored<T>(key: string, initial: T): [T, (v: T) => void] {
   }]
 }
 
-function defaults(t: TicketDraft, meta: LinearMeta): Form {
+function defaults(t: TicketDraft, meta: LinearMeta, repos: Project[], main: Project): Form {
   const byName = (name: string) => meta.labels.find((l) => l.name.toLowerCase() === name.toLowerCase())?.id
   const labelIds = [...new Set([t.type, ...t.labels].map(byName).filter((x): x is string => !!x))]
   const todo = meta.states.find((s) => s.type === 'unstarted') ?? meta.states.find((s) => s.type === 'backlog')
@@ -62,6 +64,10 @@ function defaults(t: TicketDraft, meta: LinearMeta): Form {
     priority: t.priority,
     labelIds,
     projectId: meta.projects.find((p) => p.name === t.project)?.id ?? null,
+    repos: (() => {
+      const ids = repos.filter((r) => t.repos?.some((n) => n.toLowerCase() === r.name.toLowerCase())).map((r) => r.id)
+      return ids.length ? ids : [main.id]
+    })(),
   }
 }
 
@@ -71,8 +77,9 @@ export function NewTicketPage({ project }: { project: Project }) {
   const meta = useLinearMeta(project.id, !!project.team)
   const created = useCreatedTickets(draft.id)
   const createIssues = useCreateLinearIssues(project.id)
-  const worktrees = useProjectOverview(project.id).data?.worktrees
-  const createWorktree = useCreateWorktree(project.id)
+  // Dépôts où une feature peut se développer : ce projet et ceux de son groupe (Réglages › Projets liés).
+  const repos = [project, ...(projects.data ?? []).filter((p) => p.id !== project.id && !!project.group && p.group === project.group)]
+  const overviews = useProjectOverviews(repos.map((r) => r.id))
   const createWorktrees = useCreateTicketWorktrees(project.id)
   const [feature, setFeature] = useStored(`devpanel:ticket-draft:feature:${project.id}`, '')
   const [answers, setAnswers] = useState<Record<string, string>>({})
@@ -84,30 +91,26 @@ export function NewTicketPage({ project }: { project: Project }) {
 
   const out = fresh ? null : draft.result
   const done = created.data ?? []
-  const forms = out && meta.data ? out.tickets.map((t, i) => edits[i] ?? defaults(t, meta.data)) : []
+  // Les réglages modifiés à la main l'emportent ; les champs ajoutés depuis (dépôts) gardent leur valeur proposée.
+  const forms = out && meta.data ? out.tickets.map((t, i) => ({ ...defaults(t, meta.data, repos, project), ...edits[i] })) : []
   const edit = (i: number, patch: Partial<Form>) => setEdits({ ...edits, [i]: { ...forms[i], ...patch } })
   const toCreate = forms.map((f, i) => ({ f, i })).filter(({ f, i }) => f.include && !done.some((d) => d.index === i))
-  // Ticket créé : son worktree, ou la branche à créer d'après le nom proposé par l'IA (feat/ENG-12-bank-sync).
-  const worktreeOf = (ticketId: string) => worktrees?.find((w) => w.ticketId === ticketId)?.id ?? null
+  // Ticket créé : ses worktrees (un par dépôt choisi), ou la branche à créer d'après le nom proposé par l'IA (feat/ENG-12-bank-sync).
+  const worktreeOf = (repo: string, ticketId: string) => overviews.data.find((o) => o.project.id === repo)?.worktrees.find((w) => w.ticketId === ticketId)?.id ?? null
   const branchOf = (i: number, ticketId: string) => {
     const t = out?.tickets[i]
     return t?.branch ? `${t.type === 'Bug' ? 'fix' : 'feat'}/${ticketId}-${slugify(t.branch)}` : null
   }
-  const pendingWorktrees = done
-    .map((d) => ({ ticketId: d.id, branch: branchOf(d.index, d.id), base: project.baseBranch }))
-    .filter((x): x is { ticketId: string; branch: string; base: string } => !!x.branch && !worktreeOf(x.ticketId))
-  const openWorktree = (id: string) => go({ page: 'worktree', project: project.id, wt: id })
-  const startWorktree = (ticketId: string, branch: string) =>
-    createWorktree.mutate({ mode: 'ticket', ticketId, branch, base: project.baseBranch }, {
+  const pendingTickets = done
+    .map((d) => ({ ticketId: d.id, branch: branchOf(d.index, d.id), projects: forms[d.index]?.repos ?? [project.id] }))
+    .filter((x): x is { ticketId: string; branch: string; projects: string[] } => !!x.branch && x.projects.some((r) => !worktreeOf(r, x.ticketId)))
+  const startWorktrees = (tickets: typeof pendingTickets) =>
+    createWorktrees.mutate(tickets, {
       onSuccess: (r) => {
-        toast(`Worktree créé pour ${ticketId}`)
-        openWorktree(r.id)
+        toast(plural(r.length, 'worktree prêt', 'worktrees prêts'))
+        // Un seul worktree : on l'ouvre directement.
+        if (r.length === 1) go({ page: 'worktree', project: r[0].project, wt: r[0].id })
       },
-      onError: (e) => toast(e.message, true),
-    })
-  const startAllWorktrees = () =>
-    createWorktrees.mutate(pendingWorktrees, {
-      onSuccess: (r) => toast(`${plural(r.length, 'worktree créé', 'worktrees créés')}`),
       onError: (e) => toast(`Création interrompue : ${e.message}`, true),
     })
 
@@ -160,13 +163,18 @@ export function NewTicketPage({ project }: { project: Project }) {
 
       <section className="flex flex-col gap-5 rounded-xl border bg-card p-5 shadow-xs">
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Projet</span>
+          <span className="text-sm font-medium">Projet principal <span className="font-normal text-muted-foreground">(son équipe Linear reçoit les tickets)</span></span>
           <div className="flex flex-wrap gap-2">
             {projects.data?.map((p) => (
               <Pill key={p.id} active={p.id === project.id} className="font-mono" onClick={() => go({ page: 'new-ticket', project: p.id })}>{p.name}</Pill>
             ))}
           </div>
           {!project.team && <p className="text-xs text-red-600 dark:text-red-400">Aucune équipe Linear configurée pour ce projet.</p>}
+          <p className="text-xs text-muted-foreground">
+            {repos.length > 1
+              ? `L’IA explore aussi ${repos.slice(1).map((r) => r.name).join(', ')} (projets liés) : une feature qui touche plusieurs dépôts donne des worktrees dans chacun, liés entre eux.`
+              : 'Une feature sur plusieurs dépôts ? Range-les dans un même groupe (Réglages › Projets liés) : l’IA les explorera ensemble.'}
+          </p>
         </div>
         <div className="flex flex-col gap-2">
           <FieldLabel htmlFor="feature">Feature</FieldLabel>
@@ -233,14 +241,13 @@ export function NewTicketPage({ project }: { project: Project }) {
           {meta.data && forms.map((f, i) => {
             const made = done.find((d) => d.index === i)
             return (
-              <TicketCard key={i} index={i} total={forms.length} form={f} meta={meta.data!} created={made} onChange={(patch) => edit(i, patch)}
+              <TicketCard key={i} index={i} total={forms.length} form={f} meta={meta.data!} created={made} onChange={(patch) => edit(i, patch)} repos={repos}
                 worktree={made && {
-                  id: worktreeOf(made.id),
+                  repos: f.repos.map((r) => ({ project: repos.find((x) => x.id === r)?.name ?? r, id: worktreeOf(r, made.id), open: (wt: string) => go({ page: 'worktree', project: r, wt }) })),
                   branch: branchOf(i, made.id),
                   customize: href({ page: 'create', project: project.id, ticket: made.id }),
-                  busy: createWorktree.isPending || createWorktrees.isPending,
-                  onCreate: (branch) => startWorktree(made.id, branch),
-                  onOpen: openWorktree,
+                  busy: createWorktrees.isPending,
+                  onCreate: (branch) => startWorktrees([{ ticketId: made.id, branch, projects: f.repos }]),
                 }} />
             )
           })}
@@ -250,13 +257,13 @@ export function NewTicketPage({ project }: { project: Project }) {
               <span className="text-sm text-muted-foreground">
                 {toCreate.length ? `${plural(toCreate.length, 'ticket sera créé', 'tickets seront créés')} dans l’équipe ${meta.data.teamKey}.` : done.length ? 'Tous les tickets sont créés.' : 'Aucun ticket sélectionné.'}
               </span>
-              {toCreate.length > 0 || pendingWorktrees.length < 2 ? (
+              {toCreate.length > 0 || pendingTickets.length < 2 ? (
                 <Button disabled={busy || draft.busy || toCreate.length === 0 || toCreate.some(({ f }) => !f.title.trim())} onClick={create}>
                   {busy ? <Spinner /> : <SendIcon />}{`Créer ${plural(toCreate.length, 'ticket', 'tickets')} dans Linear`}
                 </Button>
               ) : (
-                <Button disabled={createWorktrees.isPending || createWorktree.isPending} onClick={startAllWorktrees}>
-                  {createWorktrees.isPending ? <Spinner /> : <GitBranchPlusIcon />}{`Créer les ${pendingWorktrees.length} worktrees`}
+                <Button disabled={createWorktrees.isPending} onClick={() => startWorktrees(pendingTickets)}>
+                  {createWorktrees.isPending ? <Spinner /> : <GitBranchPlusIcon />}{`Créer les worktrees des ${pendingTickets.length} tickets`}
                 </Button>
               )}
             </div>
@@ -269,18 +276,45 @@ export function NewTicketPage({ project }: { project: Project }) {
 
 const NONE = '__none'
 
-/** Après la création du ticket : son worktree, à ouvrir ou à créer en un clic. */
+function CreatedWorktrees({ w }: { w: TicketWorktree }) {
+  const missing = w.repos.filter((r) => !r.id)
+  return (
+    <span className="flex flex-col gap-2">
+      <span className="flex flex-wrap items-center gap-2">
+        {w.repos.filter((r) => r.id).map((r) => (
+          <Button key={r.project} size="sm" variant="outline" onClick={() => r.open(r.id!)}><GitBranchIcon />{w.repos.length > 1 ? `Ouvrir · ${r.project}` : 'Ouvrir le worktree'}</Button>
+        ))}
+        {missing.length > 0 && (w.branch ? (
+          <>
+            <Button size="sm" disabled={w.busy} onClick={() => w.onCreate(w.branch!)}>
+              {w.busy ? <Spinner /> : <GitBranchPlusIcon />}{w.repos.length > 1 ? `Créer les worktrees · ${missing.map((r) => r.project).join(', ')}` : 'Créer le worktree'}
+            </Button>
+            <a href={w.customize} className="text-xs font-medium hover:underline">Personnaliser</a>
+          </>
+        ) : (
+          <Button size="sm" variant="outline" asChild><a href={w.customize}><GitBranchPlusIcon />Créer le worktree…</a></Button>
+        ))}
+      </span>
+      {missing.length > 0 && w.branch && (
+        <span className="text-xs text-muted-foreground">
+          Branche <span className="font-mono">{w.branch}</span>{w.repos.length > 1 && ' dans chaque dépôt, worktrees liés entre eux'}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** Après la création du ticket : ses worktrees, un par dépôt choisi, à ouvrir ou à créer en un clic. */
 interface TicketWorktree {
-  id: string | null
+  repos: { project: string; id: string | null; open: (wt: string) => void }[]
   /** Branche proposée ; null pour un brouillon rédigé avant les noms de branche (passer par la page complète). */
   branch: string | null
   customize: string
   busy: boolean
   onCreate: (branch: string) => void
-  onOpen: (id: string) => void
 }
 
-function TicketCard({ index, total, form: f, meta, created, onChange, worktree }: {
+function TicketCard({ index, total, form: f, meta, created, onChange, worktree, repos }: {
   index: number
   total: number
   form: Form
@@ -288,6 +322,7 @@ function TicketCard({ index, total, form: f, meta, created, onChange, worktree }
   created?: CreatedTicket
   onChange: (patch: Partial<Form>) => void
   worktree?: TicketWorktree
+  repos: Project[]
 }) {
   const labels = meta.labels.filter((l) => f.labelIds.includes(l.id))
   const others = meta.labels.filter((l) => !f.labelIds.includes(l.id))
@@ -301,21 +336,7 @@ function TicketCard({ index, total, form: f, meta, created, onChange, worktree }
             <span className="flex flex-wrap items-center gap-2 font-medium"><span className="font-mono">{created.id}</span>{created.title}</span>
             <a href={created.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium hover:underline">Ouvrir dans Linear<ExternalLinkIcon className="size-3.5" /></a>
           </span>
-          {worktree && (
-            <span className="flex flex-wrap items-center gap-2">
-              {worktree.id ? (
-                <Button size="sm" variant="outline" onClick={() => worktree.onOpen(worktree.id!)}><GitBranchIcon />Ouvrir le worktree</Button>
-              ) : worktree.branch ? (
-                <>
-                  <Button size="sm" disabled={worktree.busy} onClick={() => worktree.onCreate(worktree.branch!)}>{worktree.busy ? <Spinner /> : <GitBranchPlusIcon />}Créer le worktree</Button>
-                  <span className="font-mono text-xs text-muted-foreground">{worktree.branch}</span>
-                  <a href={worktree.customize} className="text-xs font-medium hover:underline">Personnaliser</a>
-                </>
-              ) : (
-                <Button size="sm" variant="outline" asChild><a href={worktree.customize}><GitBranchPlusIcon />Créer le worktree…</a></Button>
-              )}
-            </span>
-          )}
+          {worktree && <CreatedWorktrees w={worktree} />}
         </AlertDescription>
       </Alert>
     )
@@ -332,6 +353,22 @@ function TicketCard({ index, total, form: f, meta, created, onChange, worktree }
         <FieldLabel htmlFor={`${id}-title`}>Titre</FieldLabel>
         <Input id={`${id}-title`} value={f.title} onChange={(e) => onChange({ title: e.target.value })} />
       </div>
+      {repos.length > 1 && (
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium">Dépôts touchés <span className="font-normal text-muted-foreground">(un worktree dans chacun, sur la même branche)</span></span>
+          <div className="flex flex-wrap gap-1.5">
+            {repos.map((r) => {
+              const on = f.repos.includes(r.id)
+              return (
+                <Pill key={r.id} active={on} className="font-mono" disabled={on && f.repos.length === 1}
+                  onClick={() => onChange({ repos: on ? f.repos.filter((x) => x !== r.id) : [...f.repos, r.id] })}>
+                  {r.name}
+                </Pill>
+              )
+            })}
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="flex min-w-0 flex-col gap-2">
           <FieldLabel htmlFor={`${id}-assignee`}>Assigné à</FieldLabel>

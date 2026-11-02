@@ -1077,6 +1077,8 @@ export interface TicketDraft {
   project: string | null
   /** Nom de branche proposé (2 à 4 mots anglais, kebab-case) ; absent des brouillons rédigés avant son ajout. */
   branch?: string
+  /** Dépôts que le ticket modifie (noms des projets : celui de la page et ses projets liés) ; absent des anciens brouillons. */
+  repos?: string[]
 }
 
 export interface TicketDraftOutput {

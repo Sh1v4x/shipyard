@@ -96,6 +96,7 @@ Add "Dépend de : <titre de l’autre ticket>" under the Référent line when ap
 - labels: only from the team's existing labels below, those that really describe the ticket (domain, platform). The type label (Feature, Bug, Improvement) is added automatically: don't include it.
 - priority: 3 (normal) by default, 2 if the request says it is urgent or blocking.
 - project: the matching Linear project, from those below, otherwise null.
+- branch: 2 to 4 English words in kebab-case that name the change, for the git branch (e.g. `bank-sync-retry`).
 
 Existing labels: {labels}
 

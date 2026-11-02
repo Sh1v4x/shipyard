@@ -1075,6 +1075,8 @@ export interface TicketDraft {
   priority: number
   /** Nom d'un projet Linear existant, ou null. */
   project: string | null
+  /** Nom de branche proposé (2 à 4 mots anglais, kebab-case) ; absent des brouillons rédigés avant son ajout. */
+  branch?: string
 }
 
 export interface TicketDraftOutput {

@@ -688,3 +688,19 @@ export function useWakeGhost(project: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.overview(project) }),
   })
 }
+
+/** Worktrees des tickets qui viennent d'être créés, l'un après l'autre (chacun touche au dépôt). */
+export function useCreateTicketWorktrees(project: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (items: { ticketId: string; branch: string; base: string }[]) => {
+      const created: { ticketId: string; id: string }[] = []
+      for (const it of items) {
+        const r = await api<{ id: string; path: string }>(`/projects/${project}/worktrees`, { body: { mode: 'ticket', branch: it.branch, base: it.base, ticketId: it.ticketId } })
+        created.push({ ticketId: it.ticketId, id: r.id })
+      }
+      return created
+    },
+    onSettled: () => syncProject(qc, project),
+  })
+}

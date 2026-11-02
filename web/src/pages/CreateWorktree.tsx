@@ -11,10 +11,10 @@ import { useBranches, useProjectOverview } from '../data/queries.ts'
 import { useAction } from '../data/runs.ts'
 import { go, href } from '../router.ts'
 import { Badge, ErrorBox, Pill, PromptMenu, Spinner, ticketTone, useToast } from '../ui.tsx'
+import { slugify } from '../../../shared/text.ts'
 
 type Mode = 'ticket' | 'existing' | 'new'
 const PREFIXES = ['feat', 'fix', 'refactor', 'chore']
-const slugify = (s: string) => s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-')
 
 export function CreateWorktreePage({ project, ticketId, initialMode }: { project: Project; ticketId?: string; initialMode?: string }) {
   const ov = useProjectOverview(project.id)

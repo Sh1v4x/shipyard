@@ -200,7 +200,7 @@ export const ticketsProjectActions: ProjectActions = {
           '## Linked repositories',
           `${project.name} is grouped with other repositories: a feature is often developed on several of them at once (e.g. API and SDK on one side, screens on the other). Explore them like the main repository, not only for what is shared:`,
           grouped.map((p) => `- ${p.name} (${p.repo}): ${p.path}`).join('\n'),
-          '- in each ticket, list the repositories involved under the Référent line ("Dépôts : app, app-mobile");\n- in "Fichiers concernés", prefix each path with its repository (`app-mobile/src/…`);\n- split by repository only if each part can ship on its own; otherwise, one ticket covers the feature across all repositories.',
+          '- in each ticket, list the repositories involved under the Référent line ("Dépôts : app, app-mobile") and in repos;\n- in "Fichiers concernés", prefix each path with its repository (`app-mobile/src/…`);\n- one ticket covers the feature across all repositories: never split by repository on your own.',
         ].join('\n\n') : '',
         rules: rulesFor(project.id),
         labels: meta.labels.map((l) => l.name).join(', ') || '(none)',

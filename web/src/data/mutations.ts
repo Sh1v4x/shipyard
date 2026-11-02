@@ -2,10 +2,11 @@ import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-q
 import type {
   BranchDeleteResult, BranchInfo, ClaudeUsage, InsightItem, Run, Credentials, InboxItem, Note, Settings, CreatedTicket, NewIssue, PendingReview, PrFiles, Project, ProjectOverview, ReviewDecisions, ReviewDraftComment, ReviewEvent,
   TicketState, WorktreeDetail,
+  StatsReport, StatsScope,
 } from '../../../shared/types.ts'
 import { api } from './client.ts'
 import { qk } from './keys.ts'
-import { wtPath } from './queries.ts'
+import { statsPath, wtPath } from './queries.ts'
 
 // Les mutations renvoient leur réponse : les pages gardent la main sur les messages (toast) via mutateAsync.
 // Après une écriture, seul ce qui a pu changer est rechargé.
@@ -657,5 +658,14 @@ export function useSetCheckDecision(project: string, wt: string) {
       qc.setQueryData<Run>(qk.run(runId), (r) => r && { ...r, checkDecision: decision })
       return qc.invalidateQueries({ queryKey: qk.worktree(project, wt) })
     },
+  })
+}
+
+/** Relit GitHub et Linear pour la période, sans le cache du serveur. */
+export function useRefreshStats(from: string, to: string, scope: StatsScope) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<StatsReport>(statsPath(from, to, scope, true)),
+    onSuccess: (report) => qc.setQueryData(qk.stats(from, to, scope), report),
   })
 }

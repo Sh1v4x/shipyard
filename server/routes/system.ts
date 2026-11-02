@@ -8,6 +8,8 @@ import { claudeUsage } from '../lib/usage.ts'
 import { brokenWorktrees, repairWorktree } from '../lib/brokenWorktrees.ts'
 import { Hono } from 'hono'
 import { force } from '../http.ts'
+import * as inputs from '../inputs.ts'
+import { statsReport } from '../lib/stats.ts'
 
 export const systemRoutes = new Hono()
 
@@ -43,4 +45,11 @@ systemRoutes.post('/worktrees/broken/:project/:wt/:action', async (c) => {
 systemRoutes.post('/agents/:pgid/kill', async (c) => {
   await killOrphan(Number(c.req.param('pgid')))
   return c.json({ ok: true })
+})
+
+/** Mon activité sur une période (page Stats). */
+systemRoutes.get('/stats', async (c) => {
+  const q = inputs.statsQuery.safeParse(c.req.query())
+  if (!q.success) throw new HttpError(400, `Requête invalide : ${q.error.issues.map((i) => i.message).join(', ')}`)
+  return c.json(await statsReport(q.data.from, q.data.to, q.data.scope, force(c)))
 })

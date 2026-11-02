@@ -1,4 +1,4 @@
-import type { ActionKind, PromptSource } from '../../../shared/types.ts'
+import type { ActionKind, PromptSource, StatsScope } from '../../../shared/types.ts'
 
 /**
  * Clés du cache TanStack Query, en un seul endroit : les mutations invalident par préfixe
@@ -8,6 +8,7 @@ export const qk = {
   health: ['health'] as const,
   projects: ['projects'] as const,
   prompts: ['prompts'] as const,
+  stats: (from: string, to: string, scope: StatsScope) => ['stats', from, to, scope] as const,
   /** Un run terminé, gardé en cache (voir useRun). */
   run: (id: string) => ['run', id] as const,
   /** Sous ['prompts'] : relu après chaque enregistrement. */

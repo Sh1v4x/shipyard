@@ -571,6 +571,9 @@ export interface ActionInput {
   /** Paquet GitHub Packages (SDK) à mettre à jour ou à publier. */
   sdk?: string
   period?: DailyPeriod
+  /** Daily sur une période choisie (AAAA-MM-JJ, bornes comprises) : remplace `period`. */
+  since?: string
+  until?: string
   /** Re-test d'un travail (resumeFrom) : captures et vérifications refaites, code inchangé. */
   retest?: boolean
   /** Features & optimisations : type d'analyse, et digest forcé en carte. */
@@ -1276,4 +1279,44 @@ export interface RunVideo {
   short: boolean
   durationSec: number
   sizeBytes: number
+}
+
+// ---------- Stats ----------
+
+export type StatsScope = 'tracked' | 'all'
+
+export interface StatsCounts {
+  /** Commits de mes PR mergées sur la période. */
+  commits: number
+  prsOpened: number
+  prsMerged: number
+  /** Reviews envoyées sur les PR des autres (une PR peut en recevoir plusieurs). */
+  reviews: number
+  linesAdded: number
+  linesDeleted: number
+}
+
+/** Mon activité sur une période (page Stats) : de quoi chiffrer un bilan ou un entretien. */
+export interface StatsReport {
+  /** Bornes comprises, AAAA-MM-JJ. */
+  from: string
+  to: string
+  login: string
+  scope: StatsScope
+  totals: StatsCounts & {
+    /** PR des autres sur lesquelles j'ai envoyé au moins une review. */
+    reviewedPrs: number
+    approvals: number
+    changesRequested: number
+    /** Tickets Linear qui me sont assignés, terminés sur la période ; null sans clé Linear. */
+    ticketsCompleted: number | null
+  }
+  byRepo: (StatsCounts & { repo: string })[]
+  /** Une entrée par mois de la période, même vide (AAAA-MM). */
+  byMonth: { month: string; commits: number; prsMerged: number; reviews: number; ticketsCompleted: number }[]
+  /** Mes PR mergées, les plus grosses d'abord. */
+  mergedPrs: { repo: string; number: number; title: string; url: string; mergedAt: string; additions: number; deletions: number; commits: number }[]
+  tickets: { id: string; title: string; url: string; completedAt: string }[] | null
+  /** Ce qu'il faut savoir pour lire les chiffres (limites des sources). */
+  notes: string[]
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { StatsScope } from '../../shared/types.ts'
 
 /** Routeur minimal basé sur le hash : #/p/<projet>, #/p/<projet>/wt/<id>/<onglet>, #/prompts/<clé>… */
 export type Route =
@@ -14,6 +15,7 @@ export type Route =
   | { page: 'notes' }
   | { page: 'inbox' }
   | { page: 'daily' }
+  | { page: 'stats'; from?: string; to?: string; scope?: StatsScope }
   | { page: 'settings' }
 
 export function parse(hash: string): Route {
@@ -34,6 +36,10 @@ export function parse(hash: string): Route {
   if (s[0] === 'notes') return { page: 'notes' }
   if (s[0] === 'inbox') return { page: 'inbox' }
   if (s[0] === 'daily') return { page: 'daily' }
+  if (s[0] === 'stats') {
+    const scope = q.get('scope')
+    return { page: 'stats', from: q.get('from') ?? undefined, to: q.get('to') ?? undefined, scope: scope === 'all' || scope === 'tracked' ? scope : undefined }
+  }
   if (s[0] === 'settings') return { page: 'settings' }
   return { page: 'home' }
 }
@@ -66,6 +72,13 @@ export function href(r: Route): string {
       return '#/inbox'
     case 'daily':
       return '#/daily'
+    case 'stats': {
+      const q = new URLSearchParams()
+      if (r.from) q.set('from', r.from)
+      if (r.to) q.set('to', r.to)
+      if (r.scope) q.set('scope', r.scope)
+      return `#/stats${q.size ? `?${q}` : ''}`
+    }
     case 'settings':
       return '#/settings'
     default:

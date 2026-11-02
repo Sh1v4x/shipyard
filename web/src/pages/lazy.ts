@@ -11,6 +11,7 @@ export const NewTicketPage = lazy(() => import('./NewTicket.tsx').then((m) => ({
 export const PromptsPage = lazy(() => import('./Prompts.tsx').then((m) => ({ default: m.PromptsPage })))
 export const NotesPage = lazy(() => import('./Notes.tsx').then((m) => ({ default: m.NotesPage })))
 export const DailyPage = lazy(() => import('./Daily.tsx').then((m) => ({ default: m.DailyPage })))
+export const StatsPage = lazy(() => import('./Stats.tsx').then((m) => ({ default: m.StatsPage })))
 export const SettingsPage = lazy(() => import('./Settings.tsx').then((m) => ({ default: m.SettingsPage })))
 export const InsightsPage = lazy(() => import('./Insights.tsx').then((m) => ({ default: m.InsightsPage })))
 export const InboxPage = lazy(() => import('./Inbox.tsx').then((m) => ({ default: m.InboxPage })))

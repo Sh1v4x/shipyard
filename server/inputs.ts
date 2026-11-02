@@ -18,6 +18,8 @@ import type {
 import { LABEL_ROLES } from '../shared/review.ts'
 
 const id = z.string().min(1)
+/** Jour au format AAAA-MM-JJ. */
+export const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const ids = z.array(id)
 const severity = z.enum(['bloquant', 'important', 'suggestion'])
 const language = z.enum(['fr', 'en'])
@@ -96,6 +98,8 @@ export const actionInput = z.object({
   ciJobs: optional(z.array(z.object({ name: z.string(), cause: z.string(), fix: z.string() }))),
   sdk: optional(z.string()),
   period: optional(z.enum(['yesterday', 'week', 'last-week'])),
+  since: optional(isoDay),
+  until: optional(isoDay),
   retest: optional(z.boolean()),
   insights: optional(z.enum(['features', 'improve'])),
   digest: optional(z.enum(['auto', 'map'])),
@@ -158,6 +162,9 @@ export const ciRerunInput = z.object({ runId: id, jobId: optional(z.string()) })
 export const openFileInput = z.object({ file: z.string().optional() })
 export const runDecisionInput = z.object({ decision: z.enum(['approved', 'declined']), discard: z.boolean().optional() })
 export const textInput = z.object({ text: z.string() })
+export const statsQuery = z
+  .object({ from: isoDay, to: isoDay, scope: z.enum(['tracked', 'all']).default('tracked') })
+  .refine((q) => q.from <= q.to, { message: 'la date de début doit précéder la date de fin' })
 export const manualStepsInput = z.object({ checked: z.array(z.number().int().nonnegative()) })
 export const checkDecisionInput = z.object({ decision: z.enum(['pass', 'fail']).nullable() })
 

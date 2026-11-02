@@ -1,6 +1,6 @@
 import { useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type {
-  ActionKind, ActionsBlock, DiffLine, AgentProcesses, BrokenWorktree, CheckReport, SdkStatus, DigestInfo, LocalTicket, BranchInfo, ClaudeUsage, Credentials, InboxItem, Note, Settings, CreatedTicket, LinearMeta, PendingReview, PrFiles, Project, ProjectOverview, PromptInfo, PromptSource, PromptVersion, ReviewDecisions, ReviewThread,
+  ActionKind, ActionsBlock, DiffLine, AgentProcesses, BrokenWorktree, CheckReport, SdkStatus, DigestInfo, LocalTicket, BranchInfo, ClaudeUsage, Credentials, InboxItem, Note, Settings, CreatedTicket, LinearMeta, PendingReview, PrFiles, Project, ProjectOverview, PromptInfo, PromptSource, PromptVersion, ReviewDecisions, StatsReport, StatsScope, ReviewThread,
   ManualEnv, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
 } from '../../../shared/types.ts'
 import { DEFAULT_LABEL_RULES } from '../../../shared/review.ts'
@@ -14,6 +14,12 @@ export const useHealth = () =>
   useQuery({ queryKey: qk.health, queryFn: () => api<{ github: string | null; linear: boolean; claude: string | null }>('/health'), staleTime: 300_000 })
 
 export const useProjects = () => useQuery({ queryKey: qk.projects, queryFn: () => api<Project[]>('/projects'), staleTime: 300_000 })
+
+export const statsPath = (from: string, to: string, scope: StatsScope, refresh = false) => `/stats?${new URLSearchParams({ from, to, scope, ...(refresh ? { refresh: '1' } : {}) })}`
+
+/** Mon activité sur une période : lue sur GitHub et Linear, longue à calculer sur une grande période. */
+export const useStats = (from: string, to: string, scope: StatsScope) =>
+  useQuery({ queryKey: qk.stats(from, to, scope), queryFn: () => api<StatsReport>(statsPath(from, to, scope)), staleTime: 10 * 60_000, enabled: !!from && !!to && from <= to })
 
 export const usePrompts = () => useQuery({ queryKey: qk.prompts, queryFn: () => api<PromptInfo[]>('/prompts') })
 

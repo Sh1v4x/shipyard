@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { dailyRange } from './dailyRange.ts'
+import { customRange, dailyRange } from './dailyRange.ts'
 
 const at = (iso: string) => vi.setSystemTime(new Date(iso))
 const day = (d: Date | null) => d && `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -31,5 +31,10 @@ describe('dailyRange', () => {
     at('2026-10-29T09:00:00')
     const r = dailyRange('last-week')
     expect([day(r.since), day(r.until)]).toEqual(['2026-10-19', '2026-10-26'])
+  })
+
+  it('prend une plage choisie, fin comprise', () => {
+    const r = customRange('2026-09-01', '2026-10-31')
+    expect([day(r.since), day(r.until)]).toEqual(['2026-09-01', '2026-11-01'])
   })
 })

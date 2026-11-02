@@ -1,4 +1,4 @@
-import { CalendarDaysIcon, FileTextIcon, FolderGit2Icon, GitBranchIcon, GitPullRequestIcon, InboxIcon, LayoutDashboardIcon, LightbulbIcon, PlusIcon, SearchIcon, SettingsIcon, StickyNoteIcon, TicketIcon, ZapIcon, type LucideIcon } from 'lucide-react'
+import { CalendarDaysIcon, ChartColumnIcon, FileTextIcon, FolderGit2Icon, GitBranchIcon, GitPullRequestIcon, InboxIcon, LayoutDashboardIcon, LightbulbIcon, PlusIcon, SearchIcon, SettingsIcon, StickyNoteIcon, TicketIcon, ZapIcon, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Project, ProjectOverview } from '../../../shared/types.ts'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -40,7 +40,7 @@ function entries(projects: Project[], current: Project | undefined, ov: ProjectO
     ? [['Accueil · file d’attente', LayoutDashboardIcon, { page: 'overview', project: current.id }], ['Accueil · tickets', TicketIcon, { page: 'overview', project: current.id, tab: 'tickets' }], ['Accueil · mes PR', TicketIcon, { page: 'overview', project: current.id, tab: 'mypr' }], ['Accueil · reviews', TicketIcon, { page: 'overview', project: current.id, tab: 'reviews' }], ['Accueil · CI', TicketIcon, { page: 'overview', project: current.id, tab: 'ci' }], ['Nouveau worktree', PlusIcon, { page: 'create', project: current.id }], ['Features & optimisations', LightbulbIcon, { page: 'insights', project: current.id }]]
     : []
   if (current) pages.push(['Nouveau ticket', PlusIcon, { page: 'new-ticket', project: current.id }])
-  pages.push(['Automatisations', ZapIcon, { page: 'automations' }], ['À valider · tous projets', InboxIcon, { page: 'inbox' }], ['Notes', StickyNoteIcon, { page: 'notes' }], ['Daily', CalendarDaysIcon, { page: 'daily' }], ['Prompts', FileTextIcon, { page: 'prompts' }], ['Réglages', SettingsIcon, { page: 'settings' }])
+  pages.push(['Automatisations', ZapIcon, { page: 'automations' }], ['À valider · tous projets', InboxIcon, { page: 'inbox' }], ['Notes', StickyNoteIcon, { page: 'notes' }], ['Daily', CalendarDaysIcon, { page: 'daily' }], ['Stats', ChartColumnIcon, { page: 'stats' }], ['Prompts', FileTextIcon, { page: 'prompts' }], ['Réglages', SettingsIcon, { page: 'settings' }])
   for (const [label, icon, to] of pages) out.push({ id: `page:${label}`, label, hint: '', group: 'Pages', icon, to, keywords: '' })
   for (const p of projects) out.push({ id: `p:${p.id}`, label: p.name, hint: p.repo, group: 'Projets', icon: FolderGit2Icon, to: { page: 'overview', project: p.id }, keywords: p.repo })
   return out

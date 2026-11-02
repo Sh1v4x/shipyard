@@ -15,6 +15,7 @@ import * as git from './lib/git.ts'
 import * as gh from './lib/github.ts'
 import { jsonFile } from './lib/store.ts'
 import { warnOn } from './lib/log.ts'
+import { plural } from '../shared/text.ts'
 
 // « À valider » : ce que les agents terminés attendent de moi. Calculé à partir des runs enregistrés :
 // seul le dernier run d'un même type et d'une même portée compte, et un élément disparaît dès qu'il est traité
@@ -26,8 +27,6 @@ const dismissed = jsonFile<string[]>('inbox-dismissed.json', [])
 export function dismissInbox(runId: string) {
   dismissed.write([runId, ...dismissed.read().filter((id) => id !== runId)].slice(0, 500))
 }
-
-const plural = (n: number, one: string, many: string) => `${n} ${n > 1 ? many : one}`
 
 
 /** Sous-runs d'une tâche découpée : seule la tâche parente apparaît. */

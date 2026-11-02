@@ -209,3 +209,18 @@ export async function checkLinearKey(key: string): Promise<{ name: string; email
   if (!res.ok || !json.data) throw new Error(`Linear refuse la clé : ${json.errors?.map((e) => e.message).join(' · ') ?? res.statusText}`)
   return json.data.viewer
 }
+
+/** Tickets qui me sont assignés, terminés du jour `from` au jour `to` (AAAA-MM-JJ, compris). */
+export async function myCompletedTickets(from: string, to: string): Promise<{ id: string; title: string; url: string; completedAt: string }[]> {
+  const out: { id: string; title: string; url: string; completedAt: string }[] = []
+  let after: string | null = null
+  do {
+    const data: { issues: { nodes: { identifier: string; title: string; url: string; completedAt: string }[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await query(
+      `query($from:DateTimeOrDuration!,$to:DateTimeOrDuration!,$after:String){issues(first:100,after:$after,filter:{assignee:{isMe:{eq:true}},completedAt:{gte:$from,lte:$to}}){nodes{identifier title url completedAt} pageInfo{hasNextPage endCursor}}}`,
+      { from: `${from}T00:00:00Z`, to: `${to}T23:59:59Z`, after },
+    )
+    out.push(...data.issues.nodes.map((n) => ({ id: n.identifier, title: n.title, url: n.url, completedAt: n.completedAt })))
+    after = data.issues.pageInfo.hasNextPage ? data.issues.pageInfo.endCursor : null
+  } while (after)
+  return out
+}

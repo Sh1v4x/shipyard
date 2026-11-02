@@ -18,3 +18,17 @@ export function dailyRange(period: DailyPeriod): { since: Date; until: Date | nu
   since.setDate(since.getDate() - 7)
   return { since, until: d }
 }
+
+/** Jour AAAA-MM-JJ à minuit, heure locale. */
+const localDay = (day: string) => {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+/** Période choisie, bornes comprises : until est exclu, donc le lendemain de `to`. */
+export function customRange(from: string, to: string): { since: Date; until: Date } {
+  const since = localDay(from)
+  const until = localDay(to)
+  until.setDate(until.getDate() + 1)
+  return { since, until }
+}

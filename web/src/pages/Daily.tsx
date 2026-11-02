@@ -2,11 +2,21 @@ import { CopyIcon, SparklesIcon } from 'lucide-react'
 import { useState } from 'react'
 import type { DailyOutput, DailyPeriod } from '../../../shared/types.ts'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label as FieldLabel } from '@/components/ui/label'
 import { useAction } from '../data/runs.ts'
 import { Badge, Empty, Pill, PromptMenu, RunPanel, Spinner, type Tone, useToast } from '../ui.tsx'
 
 const STATUS: Record<DailyOutput['sections'][number]['items'][number]['status'], Tone> = { mergée: 'purple', ouverte: 'green', fermée: 'gray', reviewée: 'blue' }
 const PERIODS: [DailyPeriod, string][] = [['week', 'Cette semaine'], ['last-week', 'Semaine dernière'], ['yesterday', 'Depuis hier']]
+
+/** Jour local au format AAAA-MM-JJ (celui des champs date). */
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const firstOfMonth = () => {
+  const d = new Date()
+  d.setDate(1)
+  return isoDay(d)
+}
 
 /** Version texte, à coller dans Slack ou dans des notes. */
 function toMarkdown(out: DailyOutput): string {
@@ -21,9 +31,16 @@ function toMarkdown(out: DailyOutput): string {
 
 export function DailyPage() {
   // Le lundi, la semaine en cours est encore vide : on part de la semaine dernière.
-  const [period, setPeriod] = useState<DailyPeriod>(() => (new Date().getDay() === 1 ? 'last-week' : 'week'))
-  // Un rapport par période : chacun garde son dernier résultat, même après un rechargement.
-  const daily = useAction<DailyOutput>('daily', { project: 'all', ref: period }, { period })
+  const [period, setPeriod] = useState<DailyPeriod | 'custom'>(() => (new Date().getDay() === 1 ? 'last-week' : 'week'))
+  const [range, setRange] = useState({ from: firstOfMonth(), to: isoDay(new Date()) })
+  const custom = period === 'custom'
+  const rangeValid = !!range.from && !!range.to && range.from <= range.to
+  // Un rapport par période (et par plage choisie) : chacun garde son dernier résultat, même après un rechargement.
+  const daily = useAction<DailyOutput>(
+    'daily',
+    { project: 'all', ref: custom ? `${range.from}..${range.to}` : period },
+    custom ? { since: range.from, until: range.to } : { period },
+  )
   const toast = useToast()
   const out = daily.result
 
@@ -39,7 +56,8 @@ export function DailyPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         {PERIODS.map(([k, label]) => <Pill key={k} active={period === k} onClick={() => setPeriod(k)}>{label}</Pill>)}
-        <Button className="ml-auto" disabled={daily.busy} onClick={() => daily.start()}>
+        <Pill active={custom} onClick={() => setPeriod('custom')}>Période personnalisée</Pill>
+        <Button className="ml-auto" disabled={daily.busy || (custom && !rangeValid)} onClick={() => daily.start()}>
           {daily.busy ? <Spinner /> : <SparklesIcon />}{out ? 'Régénérer' : 'Générer'}
         </Button>
         {out && (
@@ -48,6 +66,22 @@ export function DailyPage() {
           </Button>
         )}
       </div>
+
+      {custom && (
+        <div className="flex flex-wrap items-end gap-3 rounded-xl border bg-card px-4 py-3">
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel htmlFor="daily-from">Du</FieldLabel>
+            <Input id="daily-from" type="date" className="w-44" value={range.from} max={range.to} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel htmlFor="daily-to">Au</FieldLabel>
+            <Input id="daily-to" type="date" className="w-44" value={range.to} min={range.from} max={isoDay(new Date())} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} />
+          </div>
+          <p className="min-w-0 flex-1 basis-60 pb-2 text-xs text-muted-foreground">
+            {rangeValid ? 'Bornes comprises. Sur une longue période, le résumé reste centré sur ce qui compte : les PR et les reviews les plus marquantes.' : 'La date de début doit précéder la date de fin.'}
+          </p>
+        </div>
+      )}
 
       <RunPanel id={daily.id} events={daily.events} running={daily.running} run={daily.run} label="Préparation du Daily" onStop={daily.stop} action={daily} />
 

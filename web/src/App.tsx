@@ -1,4 +1,4 @@
-import { CalendarDaysIcon, ChevronRightIcon, ChevronsUpDownIcon, FileTextIcon, FolderGit2Icon, HouseIcon, LightbulbIcon, MenuIcon, PinIcon, PinOffIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, SearchIcon, SettingsIcon, ShipIcon, SquareIcon, StickyNoteIcon, TicketPlusIcon, Trash2Icon, ZapIcon, type LucideIcon } from 'lucide-react'
+import { CalendarDaysIcon, ChartColumnIcon, ChevronRightIcon, ChevronsUpDownIcon, FileTextIcon, FolderGit2Icon, HouseIcon, LightbulbIcon, MenuIcon, PinIcon, PinOffIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, SearchIcon, SettingsIcon, ShipIcon, SquareIcon, StickyNoteIcon, TicketPlusIcon, Trash2Icon, ZapIcon, type LucideIcon } from 'lucide-react'
 import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import type { BrokenWorktree, Project, ProjectOverview, QueueItem, QueueTone } from '../../shared/types.ts'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,7 @@ import { LocalTicketOrphans } from './components/LocalTicketOrphans.tsx'
 import { StatusBar } from './components/StatusBar.tsx'
 import { AddProjectPage } from './pages/AddProject.tsx'
 import { OverviewPage } from './pages/Overview.tsx'
-import { AutomationsPage, CreateWorktreePage, DailyPage, InboxPage, InsightsPage, NewTicketPage, NotesPage, PromptsPage, SettingsPage, WorktreePage, loadWorktreePage } from './pages/lazy.ts'
+import { AutomationsPage, CreateWorktreePage, DailyPage, InboxPage, StatsPage, InsightsPage, NewTicketPage, NotesPage, PromptsPage, SettingsPage, WorktreePage, loadWorktreePage } from './pages/lazy.ts'
 import { go, href, useRoute, type Route } from './router.ts'
 import { ThemeToggle } from './theme.tsx'
 import { Notif, Spinner, plural, worktreeTitle, useToast } from './ui.tsx'
@@ -88,6 +88,7 @@ export function App() {
           {route.page === 'inbox' && <InboxPage />}
           {route.page === 'notes' && <NotesPage />}
           {route.page === 'daily' && <DailyPage />}
+          {route.page === 'stats' && <StatsPage from={route.from} to={route.to} scope={route.scope} />}
           {route.page === 'settings' && <SettingsPage />}
           {projects.data?.length === 0 && route.page !== 'add-project' && route.page !== 'prompts' && <AddProjectPage first />}
           </Suspense>
@@ -114,6 +115,7 @@ const PAGE_TITLES: Record<Route['page'], string> = {
   inbox: 'À valider',
   notes: 'Notes',
   daily: 'Daily',
+  stats: 'Stats',
   settings: 'Réglages',
 }
 
@@ -129,7 +131,7 @@ function TopBar({ current, overview, route, onMenu }: { current?: Project; overv
   const toast = useToast()
   const refreshing = refresh.isPending
   // Pages globales (tous projets) : pas de projet dans le fil d'Ariane.
-  const showProject = current && !['prompts', 'add-project', 'inbox', 'notes', 'daily', 'settings', 'automations', 'new-ticket'].includes(route.page)
+  const showProject = current && !['prompts', 'add-project', 'inbox', 'notes', 'daily', 'stats', 'settings', 'automations', 'new-ticket'].includes(route.page)
   return (
     <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:px-6">
       <Button variant="ghost" size="icon-sm" className="md:hidden" onClick={onMenu} aria-label="Ouvrir la navigation">
@@ -443,6 +445,9 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
         </NavLink>
         <NavLink to={href({ page: 'daily' })} icon={CalendarDaysIcon} active={route.page === 'daily'}>
           Daily
+        </NavLink>
+        <NavLink to={href({ page: 'stats' })} icon={ChartColumnIcon} active={route.page === 'stats'}>
+          Stats
         </NavLink>
         <NavLink to={href({ page: 'prompts' })} icon={FileTextIcon} active={route.page === 'prompts'} aside={modified > 0 && <span className="text-xs text-muted-foreground">{plural(modified, 'modifié', 'modifiés')}</span>}>
           Prompts

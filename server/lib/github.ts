@@ -755,11 +755,12 @@ const ACTIVITY_FIELDS = 'number,title,url,body,headRefName,state,mergedAt,closed
  */
 export async function myActivity(repo: string, since: string, until?: string): Promise<ActivityPr[]> {
   const login = await me()
-  const day = since.slice(0, 10)
-  const list = (args: string[]) => runJson<ActivityRaw[]>('gh', ['pr', 'list', '--repo', repo, '--author', '@me', '--limit', '30', '--json', ACTIVITY_FIELDS, ...args])
+  // Recherche large (dates UTC, fin comprise) : le filtrage exact sur la période se fait ensuite.
+  const range = `${since.slice(0, 10)}..${until ? until.slice(0, 10) : '*'}`
+  const list = (args: string[]) => runJson<ActivityRaw[]>('gh', ['pr', 'list', '--repo', repo, '--author', '@me', '--limit', '100', '--json', ACTIVITY_FIELDS, ...args])
   const [merged, closed, open] = await Promise.all([
-    list(['--state', 'merged', '--search', `merged:>=${day}`]),
-    list(['--state', 'closed', '--search', `closed:>=${day} is:unmerged`]),
+    list(['--state', 'merged', '--search', `merged:${range}`]),
+    list(['--state', 'closed', '--search', `closed:${range} is:unmerged`]),
     list(['--state', 'open']),
   ])
   const STATE = { MERGED: 'mergée', CLOSED: 'fermée', OPEN: 'ouverte' } as const
@@ -795,7 +796,7 @@ export interface ReviewActivity {
 export async function myReviews(repo: string, since: string, until?: string): Promise<ReviewActivity[]> {
   const login = await me()
   const list = await runJson<{ number: number; title: string; url: string; state: 'OPEN' | 'MERGED' | 'CLOSED'; author: { login: string }; reviews: { author: { login: string } | null; state: string; submittedAt: string; body: string }[] }[]>('gh', [
-    'pr', 'list', '--repo', repo, '--state', 'all', '--limit', '30', '--search', `reviewed-by:@me -author:@me updated:>=${since.slice(0, 10)}`, '--json', 'number,title,url,state,author,reviews',
+    'pr', 'list', '--repo', repo, '--state', 'all', '--limit', '100', '--search', `reviewed-by:@me -author:@me updated:>=${since.slice(0, 10)}`, '--json', 'number,title,url,state,author,reviews',
   ])
   const STATE = { MERGED: 'mergée', CLOSED: 'fermée', OPEN: 'ouverte' } as const
   return list
@@ -951,4 +952,89 @@ export async function uploadToGithub(prUrl: string, file: string, log: (text: st
 export async function setPrBody(repo: string, num: number, body: string) {
   await gh(['pr', 'edit', String(num), '--repo', repo, '--body-file', '-'], { input: body })
   clearPrCache(repo)
+}
+
+// ---------- Stats ----------
+
+export interface MyContributions {
+  login: string
+  merged: { repo: string; number: number; title: string; url: string; mergedAt: string; additions: number; deletions: number; commits: number; head: string }[]
+  opened: { repo: string; createdAt: string; head: string }[]
+  reviews: { repo: string; pr: number; state: string; date: string }[]
+  /** La recherche GitHub ne renvoie pas plus de 1 000 résultats : au-delà, les chiffres sont des minimums. */
+  truncated: boolean
+}
+
+const SEARCH_CAP = 1000
+/** Une page plus petite évite les 502 de GitHub sur les recherches lourdes (lignes, commits de chaque PR). */
+const SEARCH_PAGE = 50
+
+/** GitHub renvoie parfois 502 ou 504 sur une recherche lourde, puis répond à la tentative suivante. */
+async function withRetry<T>(load: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await load()
+    } catch (e) {
+      if (i >= attempts || !/HTTP 50[234]|timed out|timeout/i.test((e as Error).message)) throw e
+      await new Promise((r) => setTimeout(r, 1500 * i))
+    }
+  }
+}
+
+/** Résultats d'une recherche de PR, page par page (1 000 au plus au total). */
+async function searchPrs<T>(q: string, fields: string): Promise<{ nodes: T[]; total: number }> {
+  const nodes: T[] = []
+  let after: string | null = null
+  let total = 0
+  do {
+    const vars: Record<string, string> = { q, ...(after ? { after } : {}) }
+    const data: { search: { issueCount: number; nodes: T[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await withRetry(() => graphql(
+      `query($q:String!${after ? ',$after:String' : ''}){search(query:$q,type:ISSUE,first:${SEARCH_PAGE}${after ? ',after:$after' : ''}){issueCount nodes{... on PullRequest{${fields}}} pageInfo{hasNextPage endCursor}}}`,
+      vars,
+      { timeoutMs: 120_000 },
+    ))
+    total = data.search.issueCount
+    nodes.push(...data.search.nodes)
+    after = data.search.pageInfo.hasNextPage && nodes.length < SEARCH_CAP ? data.search.pageInfo.endCursor : null
+  } while (after)
+  return { nodes, total }
+}
+
+/**
+ * Mes reviews sur les PR des autres, datées. Passe par la recherche : contributionsCollection masque le détail des
+ * contributions aux dépôts d'organisation (« restricted »). Une PR reviewée sur la période a forcément été mise à
+ * jour depuis le début de la période ; les reviews sont ensuite filtrées sur leur propre date.
+ */
+async function myReviewContributions(login: string, from: string, to: string): Promise<{ reviews: MyContributions['reviews']; total: number }> {
+  const { nodes, total } = await searchPrs<{ number: number; repository: { nameWithOwner: string }; reviews: { nodes: { state: string; submittedAt: string | null }[] } }>(
+    `is:pr reviewed-by:${login} -author:${login} updated:>=${from}`,
+    `number repository{nameWithOwner} reviews(first:100,author:"${login}"){nodes{state submittedAt}}`,
+  )
+  const end = `${to}T23:59:59Z`
+  const reviews = nodes.flatMap((p) =>
+    p.reviews.nodes
+      .filter((r): r is { state: string; submittedAt: string } => !!r.submittedAt && r.state !== 'PENDING' && r.submittedAt >= `${from}T00:00:00Z` && r.submittedAt <= end)
+      .map((r) => ({ repo: p.repository.nameWithOwner, pr: p.number, state: r.state, date: r.submittedAt })),
+  )
+  return { reviews, total }
+}
+
+/** Mes PR ouvertes et mergées, et mes reviews, du jour `from` au jour `to` (AAAA-MM-JJ, compris), tous dépôts. */
+export async function myContributions(from: string, to: string): Promise<MyContributions> {
+  const login = await me()
+  const [merged, opened, reviews] = await Promise.all([
+    searchPrs<{ number: number; title: string; url: string; mergedAt: string; additions: number; deletions: number; headRefName: string; commits: { totalCount: number }; repository: { nameWithOwner: string } }>(
+      `is:pr author:${login} is:merged merged:${from}..${to}`,
+      'number title url mergedAt additions deletions headRefName commits{totalCount} repository{nameWithOwner}',
+    ),
+    searchPrs<{ createdAt: string; headRefName: string; repository: { nameWithOwner: string } }>(`is:pr author:${login} created:${from}..${to}`, 'createdAt headRefName repository{nameWithOwner}'),
+    myReviewContributions(login, from, to),
+  ])
+  return {
+    login,
+    merged: merged.nodes.map((p) => ({ repo: p.repository.nameWithOwner, number: p.number, title: p.title, url: p.url, mergedAt: p.mergedAt, additions: p.additions, deletions: p.deletions, commits: p.commits.totalCount, head: p.headRefName })),
+    opened: opened.nodes.map((p) => ({ repo: p.repository.nameWithOwner, createdAt: p.createdAt, head: p.headRefName })),
+    reviews: reviews.reviews,
+    truncated: [merged.total, opened.total, reviews.total].some((n) => n > SEARCH_CAP),
+  }
 }

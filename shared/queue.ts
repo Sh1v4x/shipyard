@@ -1,6 +1,7 @@
 import { awaitsReview, labelWithRole, needsChanges, needsTesting, reviewersToRerequest } from './review.ts'
 import { since, waitingInfo } from './timeline.ts'
 import type { InboxItem, LabelRules, ProjectOverview, PullRequest, QueueGroup, QueueItem, QueueTone, Ticket, Worktree } from './types.ts'
+import { plural } from './text.ts'
 
 // File d'attente d'un projet : une ligne par PR, branche ou ticket, avec ce qu'elle attend et où agir.
 // Calculée par le serveur avec la vue du projet ; le front y ajoute les résultats d'agents à valider (inboxToQueue).
@@ -13,8 +14,6 @@ export const QUEUE_GROUPS: { key: QueueGroup; label: string }[] = [
   { key: 'others', label: 'Attend les autres' },
   { key: 'clean', label: 'À ranger' },
 ]
-
-const plural = (n: number, one: string, many: string) => `${n} ${n > 1 ? many : one}`
 const size = (pr: PullRequest) => `+${pr.additions} −${pr.deletions} · ${plural(pr.changedFiles, 'fichier', 'fichiers')}`
 
 type Reason = QueueItem['reasons'][number]

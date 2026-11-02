@@ -5,7 +5,6 @@ import * as gh from '../lib/github.ts'
 import * as schemas from '../schemas.ts'
 import { specFrom } from './context.ts'
 import { customRange, dailyRange } from './dailyRange.ts'
-import { warnOn } from '../lib/log.ts'
 
 const DAILY_LABEL: Record<DailyPeriod, { title: string; period: string }> = {
   week: { title: 'Daily · semaine', period: 'this week' },
@@ -28,10 +27,15 @@ export async function dailyAction(input: ActionInput): Promise<Run> {
   const title = custom && lastDay ? `Daily · ${short(since)} → ${short(lastDay)}` : DAILY_LABEL[period].title
   return startJob({ kind, title, scope: { project: 'all', ref } }, async (ctx) => {
     ctx.log({ t: 'info', text: `Activité GitHub du ${since.toLocaleDateString('fr-FR')}${lastDay ? ` au ${lastDay.toLocaleDateString('fr-FR')}` : ' à aujourd’hui'} sur ${projects.map((p) => p.name).join(', ')}` })
+    // Une source illisible ne bloque pas le Daily, mais elle se voit dans son journal : sinon le résumé paraît complet.
+    const orNothing = (what: string) => (e: unknown) => {
+      ctx.log({ t: 'error', text: `${what} : lecture GitHub impossible, absent du Daily (${(e instanceof Error ? e.message : String(e)).split('\n')[0]})` })
+      return []
+    }
     const activity = await Promise.all(projects.map(async (p) => ({
       p,
-      prs: await gh.myActivity(p.repo, since.toISOString(), until?.toISOString()).catch(warnOn('gh.myActivity', [])),
-      reviews: await gh.myReviews(p.repo, since.toISOString(), until?.toISOString()).catch(warnOn('gh.myReviews', [])),
+      prs: await gh.myActivity(p.repo, since.toISOString(), until?.toISOString()).catch(orNothing(`${p.name} · mes PR`)),
+      reviews: await gh.myReviews(p.repo, since.toISOString(), until?.toISOString()).catch(orNothing(`${p.name} · mes reviews`)),
     })))
     const REVIEW_STATE: Record<string, string> = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes requested', COMMENTED: 'commented', DISMISSED: 'dismissed' }
     const text = activity.filter((a) => a.prs.length || a.reviews.length).map(({ p, prs, reviews }) => [

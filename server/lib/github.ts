@@ -742,11 +742,13 @@ interface ActivityRaw {
   state: 'OPEN' | 'MERGED' | 'CLOSED'
   mergedAt: string | null
   closedAt: string | null
-  commits: { authoredDate: string; messageHeadline: string; messageBody: string; authors: { login: string }[] }[]
-  files: { path: string; additions: number; deletions: number }[]
+  commits: { nodes: { commit: { authoredDate: string; messageHeadline: string; messageBody: string; authors: { nodes: { user: { login: string } | null }[] } } }[] }
+  files: { nodes: { path: string; additions: number; deletions: number }[] } | null
 }
 
-const ACTIVITY_FIELDS = 'number,title,url,body,headRefName,state,mergedAt,closedAt,commits,files'
+// Bornes des sous-listes : 50 PR par page × 100 commits × 5 auteurs reste loin de la limite de 500 000 nœuds de GitHub.
+const ACTIVITY_FIELDS =
+  'number title url body headRefName state mergedAt closedAt commits(first:100){nodes{commit{authoredDate messageHeadline messageBody authors(first:5){nodes{user{login}}}}}} files(first:100){nodes{path additions deletions}}'
 
 /**
  * Mes PR du dépôt actives entre `since` et `until` (dates ISO, `until` exclu ; sans `until` : jusqu'à maintenant) :
@@ -757,12 +759,8 @@ export async function myActivity(repo: string, since: string, until?: string): P
   const login = await me()
   // Recherche large (dates UTC, fin comprise) : le filtrage exact sur la période se fait ensuite.
   const range = `${since.slice(0, 10)}..${until ? until.slice(0, 10) : '*'}`
-  const list = (args: string[]) => runJson<ActivityRaw[]>('gh', ['pr', 'list', '--repo', repo, '--author', '@me', '--limit', '100', '--json', ACTIVITY_FIELDS, ...args])
-  const [merged, closed, open] = await Promise.all([
-    list(['--state', 'merged', '--search', `merged:${range}`]),
-    list(['--state', 'closed', '--search', `closed:${range} is:unmerged`]),
-    list(['--state', 'open']),
-  ])
+  const search = async (q: string) => (await searchPrs<ActivityRaw>(`repo:${repo} is:pr author:${login} ${q}`, ACTIVITY_FIELDS)).nodes
+  const [merged, closed, open] = await Promise.all([search(`is:merged merged:${range}`), search(`is:closed is:unmerged closed:${range}`), search('is:open')])
   const STATE = { MERGED: 'mergée', CLOSED: 'fermée', OPEN: 'ouverte' } as const
   const seen = new Set<number>()
   return [...merged, ...closed, ...open]
@@ -774,10 +772,11 @@ export async function myActivity(repo: string, since: string, until?: string): P
       state: until && (p.mergedAt ?? p.closedAt ?? '') >= until ? STATE.OPEN : STATE[p.state],
       body: (p.body ?? '').slice(0, 1500),
       head: p.headRefName,
-      commits: p.commits
-        .filter((c) => c.authoredDate >= since && (!until || c.authoredDate < until) && c.authors.some((a) => a.login === login) && !/^Merge /.test(c.messageHeadline))
+      commits: p.commits.nodes
+        .map((n) => n.commit)
+        .filter((c) => c.authoredDate >= since && (!until || c.authoredDate < until) && c.authors.nodes.some((a) => a.user?.login === login) && !/^Merge /.test(c.messageHeadline))
         .map((c) => ({ headline: c.messageHeadline, body: c.messageBody.slice(0, 400), date: c.authoredDate })),
-      files: [...p.files].sort((a, b) => b.additions + b.deletions - (a.additions + a.deletions)).slice(0, 15),
+      files: [...(p.files?.nodes ?? [])].sort((a, b) => b.additions + b.deletions - (a.additions + a.deletions)).slice(0, 15),
     }))
     .filter((p) => p.state !== 'ouverte' || p.commits.length > 0)
 }

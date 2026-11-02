@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import type { ActionInput, ActionKind, PromptCost, Run, RunEvent, RunScope, RunSummary } from '../../shared/types.ts'
 import { RUNS_DIR } from './config.ts'
+import { killProcessTree } from './processTree.ts'
 import { costsByPrompt, createRunStore, type RunRecord } from './runStore.ts'
 import { androidHome } from './platform.ts'
 import { fableExhausted } from './usage.ts'
@@ -84,14 +85,21 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => {
     process.exit(0)
   })
 
+/** Arrête claude et tout ce qu'il a lancé, tâches de fond comprises (SIGTERM, puis SIGKILL après 5 s). */
 function killTree(child: ChildProcess) {
-  if (child.pid == null || child.exitCode != null) return
-  try {
-    process.kill(-child.pid, 'SIGTERM') // groupe de processus : claude + ses sous-processus (tests, serveurs…)
-  } catch {
-    child.kill('SIGTERM')
-  }
+  const pid = child.pid
+  if (pid == null || child.exitCode != null) return
+  killProcessTree(pid, 'SIGTERM')
+  setTimeout(() => {
+    if (child.exitCode == null) killProcessTree(pid, 'SIGKILL')
+  }, 5000).unref()
 }
+
+/**
+ * Délai laissé à un agent après son résultat final : claude ne se termine pas tant que ses tâches de fond tournent
+ * (serveur de dev, Metro…), même si l'agent n'en a plus besoin. Passé ce délai, Shipyard les arrête lui-même.
+ */
+const RESULT_GRACE_MS = 60_000
 
 /** Termine les processus restants d'un groupe (SIGTERM, puis SIGKILL après 5 s). */
 function cleanupGroup(pid: number | undefined) {
@@ -138,11 +146,7 @@ export function cancelRun(id: string) {
   l.run.status = 'cancelled'
   l.run.events.push({ t: 'error', text: 'Arrêté à la demande.' })
   for (const sub of l.children ?? []) cancelRun(sub)
-  const child = l.child
-  if (child) {
-    killTree(child)
-    setTimeout(() => child.exitCode == null && child.pid != null && process.kill(-child.pid, 'SIGKILL'), 5000).unref()
-  }
+  if (l.child) killTree(l.child)
   return true
 }
 
@@ -372,6 +376,10 @@ export function startRun(spec: RunSpec): Run {
   }
   push({ t: 'info', text: `claude -p lancé dans ${spec.cwd}` })
 
+  // Résultat final reçu, et minuteur qui arrête ensuite les tâches de fond restées ouvertes (voir RESULT_GRACE_MS).
+  let resultDelivered = false
+  let leftovers: ReturnType<typeof setTimeout> | undefined
+
   // Les sous-agents sont identifiés par le tool_use Agent/Task qui les a lancés.
   const subNames = new Map<string, string>()
   let buf = ''
@@ -414,17 +422,25 @@ export function startRun(spec: RunSpec): Run {
       run.result = typeof msg.result === 'string' ? msg.result : null
       run.structured = msg.structured_output ?? null
       if (msg.is_error || msg.subtype !== 'success') push({ t: 'error', text: `Fin en erreur : ${msg.subtype}${msg.result ? ` — ${String(msg.result).slice(0, 300)}` : ''}` })
+      else resultDelivered = true
+      leftovers ??= setTimeout(() => {
+        if (child.exitCode != null || run.status !== 'running') return
+        push({ t: 'info', text: 'Résultat rendu, mais des tâches de fond tournaient encore (serveurs de test…) : Shipyard les arrête.' })
+        killTree(child)
+      }, RESULT_GRACE_MS)
     }
   }
 
   child.on('error', (e) => push({ t: 'error', text: `Impossible de lancer claude : ${e.message}` }))
   child.on('close', async (code) => {
     clearInterval(flush)
+    if (leftovers) clearTimeout(leftovers)
     // claude est sorti : ce qu'il a lancé et laissé tourner (app, Metro, émulateur…) part avec lui.
     cleanupGroup(child.pid)
     if (buf.trim()) handle(buf.trim())
     if (run.status !== 'cancelled') {
-      const ok = code === 0 && !run.events.some((e) => e.t === 'error') && (!spec.schema || run.structured != null)
+      // Arrêté par Shipyard après son résultat (tâches de fond restées ouvertes) : le travail est fait, ce n'est pas un échec.
+      const ok = (code === 0 || resultDelivered) && !run.events.some((e) => e.t === 'error') && (!spec.schema || run.structured != null)
       run.status = ok ? 'success' : 'error'
       if (!ok && stderr.trim()) push({ t: 'error', text: stderr.trim().slice(-800) })
       if (!ok && spec.schema && run.structured == null && code === 0) push({ t: 'error', text: 'Pas de sortie structurée.' })

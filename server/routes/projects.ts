@@ -7,6 +7,7 @@ import { listWorktreeCleanup, removeWorktrees } from '../lib/worktreeCleanup.ts'
 import { setRunDecision } from '../lib/claude.ts'
 import { HttpError, getProject, loadProjects } from '../lib/config.ts'
 import { createdTicketsPath } from '../lib/runArtifacts.ts'
+import { removeGhost, setGhost } from '../lib/ghosts.ts'
 import * as git from '../lib/git.ts'
 import * as gh from '../lib/github.ts'
 import * as linear from '../lib/linear.ts'
@@ -136,4 +137,14 @@ projectsRoutes.post('/projects/:id/linear/issues', async (c) => {
   }
   if (!error) setRunDecision(b.runId, 'approved')
   return c.json({ created, error })
+})
+
+/** Mettre de côté une PR ou un worktree (ghost), ou le réveiller. La clé est celle de sa ligne dans la file. */
+projectsRoutes.put('/projects/:id/ghosts/:key', async (c) => {
+  const p = getProject(c.req.param('id'))
+  return c.json(setGhost(p.id, c.req.param('key'), (await jsonBody(c, inputs.ghostInput)).note ?? null))
+})
+projectsRoutes.delete('/projects/:id/ghosts/:key', (c) => {
+  removeGhost(getProject(c.req.param('id')).id, c.req.param('key'))
+  return c.json({ ok: true })
 })

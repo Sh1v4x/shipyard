@@ -1,14 +1,14 @@
-import { ArrowUpRightIcon, ChevronRightIcon, GitBranchIcon, PlusIcon, XIcon } from 'lucide-react'
+import { ArrowUpRightIcon, ChevronRightIcon, GhostIcon, GitBranchIcon, PlusIcon, XIcon } from 'lucide-react'
 import { useState } from 'react'
 import { LinkWorktree } from '../components/LinkTicket.tsx'
 import { TicketStatus } from '../components/TicketStatus.tsx'
 import type { Project, PullRequest, QueueGroup, QueueItem, QueueTone, Ticket } from '../../../shared/types.ts'
-import { QUEUE_GROUPS, isActiveTicket } from '../../../shared/queue.ts'
+import { QUEUE_GROUPS, canGhost, isActiveTicket } from '../../../shared/queue.ts'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import { useCreateWorktree, useDismissInbox, useLinkTeam } from '../data/mutations.ts'
+import { useCreateWorktree, useDismissInbox, useLinkTeam, useSetGhost, useWakeGhost } from '../data/mutations.ts'
 import { useLabelRules, usePrefetchWorktree, useQueue, useTeams } from '../data/queries.ts'
 import { go, href } from '../router.ts'
 import { Badge, Empty, ErrorBox, Label, Notif, Pill, Spinner, ago, ciTone, needsChanges, plural, reviewersToRerequest, useToast, type Tone } from '../ui.tsx'
@@ -105,7 +105,7 @@ const STRIPE: Record<QueueTone, string> = {
 const PILL: Record<QueueTone, Tone> = { red: 'red', amber: 'amber', purple: 'purple', blue: 'blue', green: 'green', gray: 'gray' }
 
 /** Groupes repliés par défaut : ce qui ne demande rien tout de suite. */
-const FOLDED: QueueGroup[] = ['others', 'clean']
+const FOLDED: QueueGroup[] = ['others', 'clean', 'ghost']
 
 function QueueView({ project, items, prs }: { project: Project; items: QueueItem[]; prs: PullRequest[] }) {
   const [filter, setFilter] = useState('all')
@@ -154,7 +154,14 @@ function QueueGroupCard({ label, group, items, project, prs }: { label: string; 
 function QueueRow({ item: q, project, pr }: { item: QueueItem; project: Project; pr?: PullRequest }) {
   const prefetch = usePrefetchWorktree()
   const dismiss = useDismissInbox()
+  const setGhost = useSetGhost(project.id)
+  const wake = useWakeGhost(project.id)
   const toast = useToast()
+  const putAside = () => {
+    const note = prompt('Mettre de côté (ghost) : pourquoi ? (facultatif)')
+    if (note === null) return
+    setGhost.mutate({ key: q.key, note }, { onSuccess: () => toast(`${q.ref ?? q.title} mis de côté`), onError: (e) => toast(e.message, true) })
+  }
   // Résultat d'agent à lire : l'ouvrir suffit à le retirer de la file.
   const opened = () => { if (q.runId && q.clearsOnOpen) dismiss.mutate(q.runId) }
   const primary = q.group === 'me'
@@ -178,10 +185,21 @@ function QueueRow({ item: q, project, pr }: { item: QueueItem; project: Project;
           {q.reasons.map((r) => <Badge key={r.label} tone={PILL[r.tone]}>{r.label}</Badge>)}
           {q.detail && <span className="truncate">{q.detail}</span>}
           {q.until && <span className="shrink-0 text-muted-foreground/80">· {q.until}</span>}
+          {q.ghost && <span className="shrink-0 text-muted-foreground/80">· mis de côté {ago(q.ghost.at)}{q.ghost.note && ` : ${q.ghost.note}`}</span>}
         </span>
       </div>
       <span className="flex shrink-0 items-center gap-1.5">
         {action}
+        {q.ghost ? (
+          <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={wake.isPending} title="Le remettre dans mes tâches en cours"
+            onClick={() => wake.mutate(q.key, { onSuccess: () => toast(`${q.ref ?? q.title} réveillé`), onError: (e) => toast(e.message, true) })}>
+            <GhostIcon />Réveiller
+          </Button>
+        ) : canGhost(q) && (
+          <Button variant="ghost" size="icon-sm" aria-label="Mettre de côté (ghost)" title="Mettre de côté (ghost) : ne compte plus dans mes tâches, sans rien changer sur GitHub" className="text-muted-foreground" disabled={setGhost.isPending} onClick={putAside}>
+            <GhostIcon />
+          </Button>
+        )}
         {q.runId && (
           <Button variant="ghost" size="icon-sm" aria-label="Écarter" title="Écarter : ne plus l’afficher" className="text-muted-foreground"
             onClick={() => dismiss.mutate(q.runId!, { onError: (e) => toast(e.message, true) })}>

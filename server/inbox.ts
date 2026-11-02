@@ -6,6 +6,7 @@ import type {
 import { runHref } from '../shared/inbox.ts'
 import { allRuns } from './lib/claude.ts'
 import { readJsonFile } from './lib/store.ts'
+import { isGhostRun } from './lib/ghosts.ts'
 import { testIssues } from './lib/progress.ts'
 import type { RunRecord } from './lib/runStore.ts'
 import { manualEnvAlive } from './lib/manualEnv.ts'
@@ -181,6 +182,8 @@ export async function inboxItems(): Promise<InboxItem[]> {
   const items: InboxItem[] = []
   for (const r of latest.values()) {
     if (hidden.has(r.id) || r.status === 'running' || r.status === 'cancelled') continue
+    // PR ou worktree mis de côté : ses résultats d'agents attendent qu'il soit réveillé.
+    if (isGhostRun(r.scope.project, r.scope)) continue
     // Un échec se signale toujours ; un succès seulement s'il attend une action.
     // Un commit en attente (refusé par un hook) se signale même pour une action d'habitude silencieuse.
     if (SILENT.has(r.kind) && r.status !== 'error' && !(r.blockedCommit && !r.blockedCommit.resolvedBy)) continue

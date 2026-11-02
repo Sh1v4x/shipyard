@@ -1,14 +1,15 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { join } from 'node:path'
-import type { CreateWorktreeInput, InsightItem, LabelRole, LocalTicket, Project, ProjectOverview, PullRequest, Ticket, Worktree, WorktreeDetail, WorktreeStat } from '../shared/types.ts'
+import type { Ghost, CreateWorktreeInput, InsightItem, LabelRole, LocalTicket, Project, ProjectOverview, PullRequest, Ticket, Worktree, WorktreeDetail, WorktreeStat } from '../shared/types.ts'
 import { HttpError, PROJECTS_ROOT, decodeId, defaultWorktreeRoot, encodeId, expandHome, getProject, loadProjects, saveProjects } from './lib/config.ts'
 import { run } from './lib/exec.ts'
 import * as git from './lib/git.ts'
 import * as gh from './lib/github.ts'
 import * as linear from './lib/linear.ts'
 import { awaitsReview, needsChanges, needsRerequest, needsTesting, repoLabelsWithRole } from '../shared/review.ts'
-import { buildQueue } from '../shared/queue.ts'
+import { applyGhosts, buildQueue } from '../shared/queue.ts'
+import { ghostsOf } from './lib/ghosts.ts'
 import { labelRules } from './lib/settings.ts'
 import { setTicketLink, ticketLinks } from './lib/ticketLinks.ts'
 import { linkWorktrees, linksOf, unlinkWorktree } from './lib/worktreeLinks.ts'
@@ -117,6 +118,19 @@ gh.onPrCacheClear((repo) => {
  * force (bouton Actualiser, après une écriture) : recalcule et attend le résultat.
  */
 export function overview(project: Project, force = false): Promise<ProjectOverview> {
+  return cachedOverview(project, force).then((ov) => withGhosts(ov, ghostsOf(project.id)))
+}
+
+/**
+ * Les ghosts s'appliquent à chaque lecture, pas dans la vue en cache : en mettre un de côté prend effet tout de suite.
+ * Le total affiché partout est ce qui m'attend dans la file, ghosts exclus (les résultats d'agents s'y ajoutent côté front).
+ */
+function withGhosts(ov: ProjectOverview, ghosts: Record<string, Ghost>): ProjectOverview {
+  const queue = applyGhosts(ov.queue, ghosts)
+  return { ...ov, ghosts, queue, todo: { ...ov.todo, total: queue.filter((q) => q.group === 'me').length } }
+}
+
+function cachedOverview(project: Project, force: boolean): Promise<ProjectOverview> {
   const hit = overviews.get(project.id)
   if (hit && !force) {
     if (Date.now() - hit.at > OVERVIEW_FRESH_MS && !hit.refreshing) {
@@ -241,10 +255,7 @@ async function loadOverview(project: Project, force: boolean): Promise<ProjectOv
     errors,
     fetchedAt: new Date().toISOString(),
   }
-  const queue = buildQueue(ov, rules, await gh.me().catch(warnOn('gh.me', null)))
-  // Le total affiché partout : ce qui m'attend dans la file (les résultats d'agents s'y ajoutent côté front).
-  ov.todo.total = queue.filter((q) => q.group === 'me').length
-  return { ...ov, queue }
+  return { ...ov, ghosts: {}, queue: buildQueue(ov, rules, await gh.me().catch(warnOn('gh.me', null))) }
 }
 
 // ---------- Worktree ----------

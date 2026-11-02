@@ -279,6 +279,7 @@ function todoCounts(): TodoCounts {
 
 const overviewBase: Omit<ProjectOverview, 'queue'> = {
   project,
+  ghosts: {},
   worktrees,
   tickets,
   myPrs,

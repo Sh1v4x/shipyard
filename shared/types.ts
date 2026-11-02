@@ -206,7 +206,17 @@ export interface TodoCounts {
  * Groupe de la file d'attente. me : m'attend (seul groupe compté, partout) ; start : ticket à démarrer ;
  * progress : branche en cours sans PR ; others : attend quelqu'un d'autre ou la CI ; clean : à ranger.
  */
-export type QueueGroup = 'me' | 'start' | 'progress' | 'others' | 'clean'
+export type QueueGroup = 'me' | 'start' | 'progress' | 'others' | 'clean' | 'ghost'
+
+/**
+ * PR ou worktree mis de côté, statut propre à Shipyard (rien n'est changé sur GitHub) : il sort de « À toi », des
+ * compteurs, de « À valider » et des notifications, jusqu'à ce que je le réveille.
+ */
+export interface Ghost {
+  at: string
+  /** Pourquoi je le laisse de côté, pour m'en souvenir. */
+  note: string | null
+}
 export type QueueTone = 'red' | 'amber' | 'purple' | 'green' | 'blue' | 'gray'
 
 /** Une ligne de la file d'attente : ce qu'il y a à faire, pourquoi, et où le faire. */
@@ -234,10 +244,14 @@ export interface QueueItem {
   runId?: string
   clearsOnOpen?: boolean
   until?: string
+  /** Mis de côté (groupe ghost). */
+  ghost?: Ghost
 }
 
 export interface ProjectOverview {
   project: Project
+  /** Mes ghosts du projet, par clé de ligne de la file (`pr:<numéro>` ou `wt:<id>`). */
+  ghosts: Record<string, Ghost>
   worktrees: Worktree[]
   tickets: Ticket[]
   myPrs: PullRequest[]

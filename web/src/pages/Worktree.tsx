@@ -1,4 +1,4 @@
-import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, CircleIcon, ClockIcon, CodeIcon, CopyIcon, EllipsisIcon, GitMergeIcon, Loader2Icon, MinusIcon, PinIcon, PinOffIcon, RotateCcwIcon, Trash2Icon, XIcon, type LucideIcon } from 'lucide-react'
+import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, CircleIcon, ClockIcon, CodeIcon, CopyIcon, EllipsisIcon, GhostIcon, GitMergeIcon, Loader2Icon, MinusIcon, PinIcon, PinOffIcon, RotateCcwIcon, Trash2Icon, XIcon, type LucideIcon } from 'lucide-react'
 import { useState } from 'react'
 import { LinkTicket } from '../components/LinkTicket.tsx'
 import { LabelPicker } from '../components/LabelPicker.tsx'
@@ -7,12 +7,13 @@ import { MoveWorktree } from '../components/MoveWorktree.tsx'
 import { TicketStatus } from '../components/TicketStatus.tsx'
 import { PrTimeline } from '../components/PrTimeline.tsx'
 import type { CheckReport, LabelRules, Project, PullRequest, ReviewThread, SdkStatus, TestsSummary, Worktree, WorktreeDetail } from '../../../shared/types.ts'
-import { useFinishWorktree, useOpenInEditor, useRemoveWorktree, useRerequestReview } from '../data/mutations.ts'
+import { useFinishWorktree, useOpenInEditor, useRemoveWorktree, useRerequestReview, useSetGhost, useWakeGhost } from '../data/mutations.ts'
 import { usePins } from '../data/pins.ts'
-import { useChecks, useHealth, useLabelRules, useSdkStatus, useThreads, useWorktreeDetail } from '../data/queries.ts'
+import { useChecks, useHealth, useLabelRules, useProjectOverview, useSdkStatus, useThreads, useWorktreeDetail } from '../data/queries.ts'
 import { awaitsReview, labelWithRole, needsChanges, needsTesting } from '../../../shared/review.ts'
 import { isStale, since, waitingInfo } from '../../../shared/timeline.ts'
 import { go } from '../router.ts'
+import { ghostKey } from '../../../shared/queue.ts'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
@@ -57,6 +58,9 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
   const toast = useToast()
   const rules = useLabelRules()
   const pins = usePins()
+  const ghosts = useProjectOverview(project.id).data?.ghosts
+  const setGhost = useSetGhost(project.id)
+  const wake = useWakeGhost(project.id)
   const [history, setHistory] = useState(false)
   const d = q.data
   const hasPr = !!d?.pr && !d.worktree.merged
@@ -81,6 +85,14 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
   const ok = status.filter((s) => s.state === 'ok').length
   const ctx = { project, detail: d, wtId }
   const pinned = pins.isPinned(project.id, wtId)
+  const ghostId = ghostKey(pr?.number, wtId)
+  const ghost = ghostId ? ghosts?.[ghostId] : undefined
+  const toggleGhost = () => {
+    if (!ghostId) return
+    if (ghost) return wake.mutate(ghostId, { onSuccess: () => toast('Remis dans tes tâches en cours'), onError: (e) => toast(e.message, true) })
+    const note = prompt('Mettre de côté (ghost) : pourquoi ? (facultatif)')
+    if (note !== null) setGhost.mutate({ key: ghostId, note }, { onSuccess: () => toast('Mis de côté : il ne compte plus dans tes tâches'), onError: (e) => toast(e.message, true) })
+  }
   const wait = pr && waitingInfo(pr, me)
   const goTo = (k: string) => go({ page: 'worktree', project: project.id, wt: wtId, tab: k })
 
@@ -99,6 +111,7 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
                 <Button variant="ghost" size="icon-sm" aria-label="Plus d’actions"><EllipsisIcon /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                {!w.merged && <DropdownMenuItem onSelect={toggleGhost}><GhostIcon />{ghost ? 'Réveiller : remettre dans mes tâches' : 'Mettre de côté (ghost)'}</DropdownMenuItem>}
                 <DropdownMenuItem onSelect={() => pins.toggle(project.id, wtId)}>{pinned ? <PinOffIcon /> : <PinIcon />}{pinned ? 'Désépingler' : 'Épingler dans la barre latérale'}</DropdownMenuItem>
                 {pr && <DropdownMenuItem asChild><a href={pr.url} target="_blank" rel="noreferrer"><ArrowUpRightIcon />Ouvrir la PR sur GitHub</a></DropdownMenuItem>}
                 {ticket && <DropdownMenuItem asChild><a href={ticket.url} target="_blank" rel="noreferrer"><ArrowUpRightIcon />Ouvrir {ticket.id} dans Linear</a></DropdownMenuItem>}
@@ -112,6 +125,7 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
             <>
               <a className="font-mono text-[13px] font-medium text-foreground hover:underline" href={pr.url} target="_blank" rel="noreferrer">#{pr.number}</a>
               <Badge tone={pr.mine ? 'blue' : 'purple'}>{pr.mine ? 'Ma PR' : `Review · ${pr.author}`}</Badge>
+              {ghost && <span title={ghost.note ?? "Mis de côté"}><Badge tone="gray"><GhostIcon className="size-3" />Ghost</Badge></span>}
               {pr.isDraft && <Badge tone="gray">draft</Badge>}
               <span aria-hidden>·</span>
             </>

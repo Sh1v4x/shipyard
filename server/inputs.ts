@@ -162,6 +162,7 @@ export const ciRerunInput = z.object({ runId: id, jobId: optional(z.string()) })
 export const openFileInput = z.object({ file: z.string().optional() })
 export const runDecisionInput = z.object({ decision: z.enum(['approved', 'declined']), discard: z.boolean().optional() })
 export const textInput = z.object({ text: z.string() })
+export const ghostInput = z.object({ note: z.string().max(500).nullable().optional() })
 export const statsQuery = z
   .object({ from: isoDay, to: isoDay, scope: z.enum(['tracked', 'all']).default('tracked') })
   .refine((q) => q.from <= q.to, { message: 'la date de début doit précéder la date de fin' })

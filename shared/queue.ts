@@ -1,6 +1,6 @@
 import { awaitsReview, labelWithRole, needsChanges, needsTesting, reviewersToRerequest } from './review.ts'
 import { since, waitingInfo } from './timeline.ts'
-import type { InboxItem, LabelRules, ProjectOverview, PullRequest, QueueGroup, QueueItem, QueueTone, Ticket, Worktree } from './types.ts'
+import type { Ghost, InboxItem, LabelRules, ProjectOverview, PullRequest, QueueGroup, QueueItem, QueueTone, Ticket, Worktree } from './types.ts'
 import { plural } from './text.ts'
 
 // File d'attente d'un projet : une ligne par PR, branche ou ticket, avec ce qu'elle attend et où agir.
@@ -13,6 +13,7 @@ export const QUEUE_GROUPS: { key: QueueGroup; label: string }[] = [
   { key: 'progress', label: 'En cours · sans PR' },
   { key: 'others', label: 'Attend les autres' },
   { key: 'clean', label: 'À ranger' },
+  { key: 'ghost', label: 'Ghost · mis de côté' },
 ]
 const size = (pr: PullRequest) => `+${pr.additions} −${pr.deletions} · ${plural(pr.changedFiles, 'fichier', 'fichiers')}`
 
@@ -39,7 +40,7 @@ function myPrReasons(pr: PullRequest, rules: LabelRules): (Reason & { tab: strin
 
 const isApproved = (pr: PullRequest, rules: LabelRules) => !!labelWithRole(rules, 'approved', pr.labels) || pr.reviewDecision === 'APPROVED'
 
-export function buildQueue(ov: Omit<ProjectOverview, 'queue'>, rules: LabelRules, me: string | null): QueueItem[] {
+export function buildQueue(ov: Omit<ProjectOverview, 'queue' | 'ghosts'>, rules: LabelRules, me: string | null): QueueItem[] {
   const items: QueueItem[] = []
   const ticketOf = (id: string | null) => ov.tickets.find((t) => t.id === id)
   const seenPrs = new Set<number>()
@@ -146,3 +147,18 @@ export function inboxToQueue(i: InboxItem): QueueItem {
 /** Nombre affiché partout : ce qui m'attend dans le projet, résultats d'agents compris. */
 export const queueCount = (queue: QueueItem[] | undefined, inbox: InboxItem[] | undefined, project: string) =>
   (queue ?? []).filter((q) => q.group === 'me').length + (inbox ?? []).filter((i) => i.project === project).length
+
+/** Clé de ghost d'un worktree ou d'une PR : la PR quand il y en a une (même clé que sa ligne dans la file). */
+export const ghostKey = (prNumber: number | null | undefined, worktree: string | null | undefined): string | null =>
+  prNumber ? `pr:${prNumber}` : worktree ? `wt:${worktree}` : null
+
+/** Peut être mis de côté : une PR ou un worktree en cours (pas un ticket à démarrer ni un résultat d'agent). */
+export const canGhost = (q: QueueItem) => (q.kind === 'mine' || q.kind === 'review' || q.kind === 'branch') && q.group !== 'clean'
+
+/** Range les ghosts dans leur groupe, hors de « À toi » : ils ne comptent plus. */
+export function applyGhosts(queue: QueueItem[], ghosts: Record<string, Ghost>): QueueItem[] {
+  return queue.map((q) => {
+    const g = canGhost(q) || q.group === 'ghost' ? ghosts[q.key] : undefined
+    return g ? { ...q, group: 'ghost', tone: 'gray', ghost: g } : q
+  })
+}

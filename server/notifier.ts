@@ -22,14 +22,18 @@ function tasksOf(p: Project, ov: ProjectOverview): Task[] {
     return wt ? `#/p/${p.id}/wt/${wt.id}/${tab}` : `#/p/${p.id}/${overviewTab}`
   }
   const add = (key: string, count: number, title: string, body: string, href: string) => out.push({ key: `${p.id}:${key}`, count, title, body, href })
+  // Une PR mise de côté (ghost) ne notifie plus.
+  const ghost = (num: number) => `pr:${num}` in ov.ghosts
 
   for (const num of ov.requestedReviews) {
+    if (ghost(num)) continue
     const pr = ov.reviewPrs.find((x) => x.number === num)
     add(`review#${num}`, 1, `Review demandée · ${p.name} #${num}`, pr ? `${pr.title} (${pr.author})` : '', prHref(num, 'review', 'reviews'))
   }
   const rules = labelRules()
   for (const pr of ov.myPrs) {
     const n = pr.number
+    if (ghost(n)) continue
     if (pr.unresolvedThreads) add(`comments#${n}`, pr.unresolvedThreads, `${pr.unresolvedThreads} commentaire(s) à traiter · #${n}`, pr.title, prHref(n, 'comments', 'mypr'))
     if (pr.ci.failing) add(`ci#${n}`, pr.ci.failing, `CI en échec · #${n}`, `${pr.ci.failing} job(s) : ${pr.title}`, prHref(n, 'ci', 'ci'))
     if (pr.conflicts) add(`conflict#${n}`, 1, `Conflits avec ${pr.base} · #${n}`, pr.title, prHref(n, 'conflicts', 'mypr'))

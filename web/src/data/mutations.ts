@@ -669,3 +669,22 @@ export function useRefreshStats(from: string, to: string, scope: StatsScope) {
     onSuccess: (report) => qc.setQueryData(qk.stats(from, to, scope), report),
   })
 }
+
+// ---------- Ghosts ----------
+
+/** Met de côté une PR ou un worktree (clé `pr:<numéro>` ou `wt:<id>`) : il sort de « À toi » jusqu'à son réveil. */
+export function useSetGhost(project: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ key, note }: { key: string; note: string | null }) => api(`/projects/${project}/ghosts/${encodeURIComponent(key)}`, { method: 'PUT', body: { note } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.overview(project) }),
+  })
+}
+
+export function useWakeGhost(project: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (key: string) => api(`/projects/${project}/ghosts/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.overview(project) }),
+  })
+}

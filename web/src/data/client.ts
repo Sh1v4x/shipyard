@@ -25,7 +25,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
 // puis TanStack Query les met à jour en arrière-plan.
 
 // À changer quand la forme d'une donnée gardée change : l'ancien cache est alors ignoré.
-const PERSIST_KEY = 'devpanel:query-cache:v2'
+const PERSIST_KEY = 'devpanel:query-cache:v3'
 const PERSISTED = new Set(['projects', 'overview', 'worktree', 'prompts', 'ticket-states', 'linear-meta', 'notes', 'settings'])
 const MAX_AGE = 24 * 3600_000
 

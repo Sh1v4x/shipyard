@@ -29,10 +29,12 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
   const [skipped, setSkipped] = useState<string[]>([])
   const testOnly = repos.filter((x) => !skipped.includes(x.id)).map((x) => x.id)
 
-  const askFix = async (name: string, detailText: string, decided?: string) => {
+  // Test de worktrees liés : le correctif part de ce worktree, l'agent travaille aussi dans les dépôts liés.
+  const askFix = async (name: string, detailText: string, decided?: string, repo?: string) => {
+    const where = repo && repo !== project.name ? ` Repository: ${repo} (linked worktree).` : ''
     const extra = decided
-      ? `The PR test raised a point that the user has settled. Scenario: "${name}". Finding: ${detailText}. The user's decision: ${decided}. Apply this decision with a minimal fix, then rerun the relevant test.`
-      : `Fix this failure found by the PR test. Scenario: "${name}". Finding: ${detailText}. Minimal fix, then rerun the relevant test.`
+      ? `The PR test raised a point that the user has settled.${where} Scenario: "${name}". Finding: ${detailText}. The user's decision: ${decided}. Apply this decision with a minimal fix, then rerun the relevant test.`
+      : `Fix this failure found by the PR test.${where} Scenario: "${name}". Finding: ${detailText}. Minimal fix, then rerun the relevant test.`
     const id = await fixer.start({ extra })
     if (id) {
       toast('Correctif demandé : suivi dans l’onglet Ticket')
@@ -97,7 +99,7 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
               </summary>
               <div className="flex flex-col gap-4 border-t p-4">
                 {p.runId && <TestVideos runId={p.runId} endedAt={test.run?.endedAt ?? null} />}
-                {p.output && <TestReport r={p.output} runId={p.runId ?? test.id} onFix={p.worktree === wtId && mine ? askFix : undefined} onRetest={p.worktree === wtId ? retest : undefined} />}
+                {p.output && <TestReport r={p.output} runId={p.runId ?? test.id} onFix={mine ? (n, d, decided) => askFix(n, d, decided, p.projectName) : undefined} onRetest={p.worktree === wtId ? retest : undefined} />}
               </div>
             </details>
           ))}

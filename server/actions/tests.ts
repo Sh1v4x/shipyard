@@ -161,6 +161,8 @@ function videoGuide(webRepos: string[], android: boolean, dir: string): string {
         '- Web: once the app is open in the browser (before the first scenario), call `browser_video_show_actions` then `browser_start_video` without a file name.',
         '- At the start of each scenario, call `browser_video_chapter` with the scenario name (title) and what it checks in one sentence (description).',
         '- After the last scenario, call `browser_stop_video`, and only then close the browser and stop the app.',
+      ]).concat([
+        '- If `browser_start_video` fails (missing ffmpeg: install it with the command given in the error), call `browser_stop_video` then `browser_start_video` again before the first scenario: a scenario played without a running recording has no video.',
       ]).join('\n'),
     android && '- Android: Shipyard itself records the emulator screen as soon as it is ready. Do not start a recording yourself, and do not stop the emulator at the end: Shipyard retrieves the video, then stops it if it was not running before the test.',
   ].filter(Boolean).join('\n')

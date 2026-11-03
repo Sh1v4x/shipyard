@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Run, InsightsMode, TicketDraftOutput, TicketPlanOutput, TicketWorkOutput } from '../../shared/types.ts'
 import { HttpError, loadProjects } from '../lib/config.ts'
-import { getRun, setRunDecision, startRun } from '../lib/claude.ts'
+import { getRun, listRuns, setRunDecision, startRun } from '../lib/claude.ts'
 import { run } from '../lib/exec.ts'
 import * as git from '../lib/git.ts'
 import { rulesFor } from '../lib/rules.ts'
@@ -25,6 +25,17 @@ function formatPlan(p: TicketPlanOutput): string {
     p.screenshots.length ? `Screens to capture:\n${p.screenshots.map((x) => `- ${x.name}: ${x.route} (${x.description})`).join('\n')}` : 'No screen to capture: no visible effect.',
     p.risks.length ? `\nPoints of attention:\n${p.risks.map((r) => `- ${r}`).join('\n')}` : '',
   ].join('\n')
+}
+
+/** Dernier plan réussi du worktree, pour un correctif lancé hors de l'onglet Ticket. */
+function lastPlanId({ project, worktree }: WorktreeAction['scope']): string | null {
+  return [...listRuns({ project, worktree, kind: 'ticket-plan', status: 'success' }, 1), ...listRuns({ project, worktree, kind: 'change-plan', status: 'success' }, 1)]
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]?.id ?? null
+}
+
+/** Plan d'une seule étape tiré de la consigne, quand le worktree n'a jamais eu de plan. */
+function requestPlan(request: string): TicketPlanOutput {
+  return { summary: request, steps: [{ title: 'Apply the requested fix', details: request, files: [] }], screenshots: [], risks: [], questions: [] }
 }
 
 async function planAction({ kind, input, d, scope, cwd, vars }: WorktreeAction): Promise<Run> {
@@ -55,8 +66,11 @@ async function planAction({ kind, input, d, scope, cwd, vars }: WorktreeAction):
 }
 
 async function workAction({ kind, input, project, d, scope, cwd, vars }: WorktreeAction): Promise<Run> {
-  const planRun = input.planRunId ? getRun(input.planRunId) : null
-  const plan = planRun?.structured as TicketPlanOutput | null
+  // Un correctif demandé depuis l'onglet Tests n'a pas de plan à lui : il reprend le dernier plan du worktree,
+  // sinon sa consigne fait office de plan.
+  const planId = input.planRunId ?? (input.extra?.trim() ? lastPlanId(scope) : null)
+  const planRun = planId ? getRun(planId) : null
+  const plan = (planRun?.structured as TicketPlanOutput | null) ?? (input.extra?.trim() ? requestPlan(input.extra.trim()) : null)
   if (!plan) throw new HttpError(400, 'Approuve d’abord un plan')
   const previous = input.resumeFrom ? getRun(input.resumeFrom) : null
   const feedback = input.feedback?.trim()
@@ -128,7 +142,7 @@ async function workAction({ kind, input, project, d, scope, cwd, vars }: Worktre
       'shots.dir': shotsDir,
       rules: rulesFor(project.id),
     }, {
-      id, kind, title: feedback ? 'Corrections' : kind === 'change' ? 'Modification libre' : d.ticket ? `Réaliser ${d.ticket.id}` : 'Tâche libre', scope: { ...scope, ref: input.planRunId }, cwd,
+      id, kind, title: feedback ? 'Corrections' : kind === 'change' ? 'Modification libre' : d.ticket ? `Réaliser ${d.ticket.id}` : 'Tâche libre', scope: { ...scope, ref: planId ?? undefined }, cwd,
       schema: schemas.ticketWorkSchema, addDirs: [shotsDir, ...linked.dirs], resume: feedback ? previous?.sessionId : null,
       mcpServers: playwright,
     }),

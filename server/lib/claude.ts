@@ -101,6 +101,18 @@ function killTree(child: ChildProcess) {
  */
 const RESULT_GRACE_MS = 60_000
 
+/**
+ * Sans aucune sortie de claude pendant ce délai et sans résultat, l'agent est bloqué (outil qui ne répond plus, comme
+ * un navigateur figé). Les commandes ont leur propre limite (10 min au plus), les outils MCP aussi (MCP_TOOL_TIMEOUT).
+ */
+const STALL_MS = 20 * 60_000
+
+const STALL_RESUME_PROMPT = [
+  'Shipyard stopped you: no progress for 20 minutes, most likely a tool or command that stopped responding (browser, emulator, network).',
+  'The servers and tools you had started in the background were stopped too: restart what you need.',
+  'Do not repeat the action that hung as is: restart the tool (reopen the browser, restart the emulator) or work around it, then continue the task where you left off and deliver your output.',
+].join(' ')
+
 /** Termine les processus restants d'un groupe (SIGTERM, puis SIGKILL après 5 s). */
 function cleanupGroup(pid: number | undefined) {
   if (pid == null) return
@@ -306,7 +318,9 @@ function summarizeTool(name: string, input: Record<string, unknown>): string {
  */
 const SHIPYARD_ONLY = ['PORT', 'PANEL_URL', 'WORKTREE_ROOT', 'PROJECTS_ROOT']
 export function agentEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_ENTRYPOINT: 'shipyard' }
+  // MCP_TOOL_TIMEOUT : un outil MCP figé (navigateur Playwright qui ne répond plus) renvoie une erreur au bout de
+  // 3 min au lieu de bloquer l'agent ; il peut alors relancer l'outil.
+  const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_ENTRYPOINT: 'shipyard', MCP_TOOL_TIMEOUT: String(3 * 60_000) }
   for (const k of SHIPYARD_ONLY) delete env[k]
   // Outils Android (emulator, adb) dans le PATH : les agents testent les apps mobiles sur l'émulateur.
   const sdk = androidHome()
@@ -336,12 +350,10 @@ export function startRun(spec: RunSpec): Run {
     sessionId: null,
   }
 
-  // Le prompt passe par stdin : un diff de PR peut dépasser la taille max d'un argument.
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--append-system-prompt', systemPrompt()]
   if (!spec.userSettings) args.push('--setting-sources', 'project,local')
   if (spec.mcpServers) args.push('--mcp-config', JSON.stringify({ mcpServers: spec.mcpServers }), '--strict-mcp-config')
   else if (!spec.userSettings) args.push('--strict-mcp-config')
-  if (spec.resume) args.push('--resume', spec.resume)
   // Sans modèle fixé, l'agent prend Fable (le défaut) : quota épuisé, il passe sur Opus plutôt que d'échouer.
   const model = spec.model ?? (fableExhausted() ? 'opus' : null)
   if (model) args.push('--model', model)
@@ -354,11 +366,9 @@ export function startRun(spec: RunSpec): Run {
   if (spec.schema) args.push('--json-schema', JSON.stringify(spec.schema))
   if (spec.agents?.length) args.push('--agents', JSON.stringify(loadAgents(spec.agents)))
 
-  // detached : claude devient chef de groupe, ce qui permet d'arrêter aussi ce qu'il a lancé.
-  const child = spawn('claude', args, { cwd: spec.cwd, detached: true, env: agentEnv(), stdio: ['pipe', 'pipe', 'pipe'] })
-  child.stdin.end(spec.prompt)
   const bus = new EventEmitter()
-  live.set(run.id, { run, child, bus })
+  const entry: Live = { run, bus }
+  live.set(run.id, entry)
   save(run)
 
   // Sauvegarde régulière : un rechargement de page ou un redémarrage retrouve l'état du run.
@@ -374,93 +384,126 @@ export function startRun(spec: RunSpec): Run {
     dirty = true
     bus.emit('event', e)
   }
-  push({ t: 'info', text: `claude -p lancé dans ${spec.cwd}` })
+  // Une seule relance automatique par run après un blocage (voir STALL_MS).
+  let relaunched = false
 
-  // Résultat final reçu, et minuteur qui arrête ensuite les tâches de fond restées ouvertes (voir RESULT_GRACE_MS).
-  let resultDelivered = false
-  let leftovers: ReturnType<typeof setTimeout> | undefined
+  /** Lance claude (ou reprend sa session) et branche sa sortie sur le run. */
+  const launch = (prompt: string, resume: string | null | undefined) => {
+    // detached : claude devient chef de groupe, ce qui permet d'arrêter aussi ce qu'il a lancé.
+    const child = spawn('claude', [...args, ...(resume ? ['--resume', resume] : [])], { cwd: spec.cwd, detached: true, env: agentEnv(), stdio: ['pipe', 'pipe', 'pipe'] })
+    entry.child = child
+    child.stdin.end(prompt)
+    // Coût des lancements précédents (relance) : celui que claude annonce est cumulé pour ce processus seulement.
+    const priorCost = run.costUsd ?? 0
+    push({ t: 'info', text: resume && relaunched ? 'claude -p relancé (reprise de la session)' : `claude -p lancé dans ${spec.cwd}` })
 
-  // Les sous-agents sont identifiés par le tool_use Agent/Task qui les a lancés.
-  const subNames = new Map<string, string>()
-  let buf = ''
-  child.stdout.setEncoding('utf8')
-  child.stdout.on('data', (chunk: string) => {
-    buf += chunk
-    for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
-      const line = buf.slice(0, i).trim()
-      buf = buf.slice(i + 1)
-      if (line) handle(line)
-    }
-  })
-  let stderr = ''
-  child.stderr.setEncoding('utf8')
-  child.stderr.on('data', (c: string) => {
-    stderr += c
-  })
+    // Résultat final reçu, et minuteur qui arrête ensuite les tâches de fond restées ouvertes (voir RESULT_GRACE_MS).
+    let resultDelivered = false
+    let leftovers: ReturnType<typeof setTimeout> | undefined
+    // Dernière sortie de claude : sans rien depuis STALL_MS et sans résultat, l'agent est bloqué.
+    let lastOutput = Date.now()
+    let stalled = false
+    const watchdog = setInterval(() => {
+      if (resultDelivered || child.exitCode != null || Date.now() - lastOutput < STALL_MS) return
+      clearInterval(watchdog)
+      stalled = true
+      push({ t: 'info', text: `Aucune activité depuis ${STALL_MS / 60_000} min : l’agent est bloqué (outil ou commande qui ne répond plus). Shipyard l’arrête${relaunched ? '' : ' et le relance'}.` })
+      killTree(child)
+    }, 60_000)
 
-  function handle(line: string) {
-    const msg = parseStreamMessage(line)
-    if (!msg) return
-    if (msg.session_id) run.sessionId = msg.session_id
-    const sub = msg.parent_tool_use_id ? subNames.get(msg.parent_tool_use_id) ?? 'sous-agent' : undefined
-    if (msg.type === 'assistant') {
-      for (const c of msg.message?.content ?? []) {
-        if (c.type === 'text' && c.text?.trim()) push({ t: 'text', text: c.text.trim(), sub })
-        if (c.type === 'tool_use') {
-          if (c.name === 'StructuredOutput') continue
-          if (c.name === 'Agent' || c.name === 'Task') subNames.set(c.id, String(c.input?.subagent_type ?? c.input?.description ?? 'sous-agent'))
-          try {
-            spec.onTool?.(c.name, c.input ?? {})
-          } catch {
-            /* un suivi en échec ne doit pas casser le run */
+    // Les sous-agents sont identifiés par le tool_use Agent/Task qui les a lancés.
+    const subNames = new Map<string, string>()
+    let buf = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      lastOutput = Date.now()
+      buf += chunk
+      for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+        const line = buf.slice(0, i).trim()
+        buf = buf.slice(i + 1)
+        if (line) handle(line)
+      }
+    })
+    let stderr = ''
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (c: string) => {
+      stderr += c
+    })
+
+    function handle(line: string) {
+      const msg = parseStreamMessage(line)
+      if (!msg) return
+      if (msg.session_id) run.sessionId = msg.session_id
+      const sub = msg.parent_tool_use_id ? subNames.get(msg.parent_tool_use_id) ?? 'sous-agent' : undefined
+      if (msg.type === 'assistant') {
+        for (const c of msg.message?.content ?? []) {
+          if (c.type === 'text' && c.text?.trim()) push({ t: 'text', text: c.text.trim(), sub })
+          if (c.type === 'tool_use') {
+            if (c.name === 'StructuredOutput') continue
+            if (c.name === 'Agent' || c.name === 'Task') subNames.set(c.id, String(c.input?.subagent_type ?? c.input?.description ?? 'sous-agent'))
+            try {
+              spec.onTool?.(c.name, c.input ?? {})
+            } catch {
+              /* un suivi en échec ne doit pas casser le run */
+            }
+            push({ t: 'tool', name: c.name, summary: summarizeTool(c.name, c.input ?? {}), sub, at: Date.now() })
           }
-          push({ t: 'tool', name: c.name, summary: summarizeTool(c.name, c.input ?? {}), sub, at: Date.now() })
+        }
+      } else if (msg.type === 'result') {
+        run.costUsd = priorCost + (msg.total_cost_usd ?? 0)
+        run.result = typeof msg.result === 'string' ? msg.result : null
+        run.structured = msg.structured_output ?? null
+        if (msg.is_error || msg.subtype !== 'success') push({ t: 'error', text: `Fin en erreur : ${msg.subtype}${msg.result ? ` — ${String(msg.result).slice(0, 300)}` : ''}` })
+        else resultDelivered = true
+        leftovers ??= setTimeout(() => {
+          if (child.exitCode != null || run.status !== 'running') return
+          push({ t: 'info', text: 'Résultat rendu, mais des tâches de fond tournaient encore (serveurs de test…) : Shipyard les arrête.' })
+          killTree(child)
+        }, RESULT_GRACE_MS)
+      }
+    }
+
+    child.on('error', (e) => push({ t: 'error', text: `Impossible de lancer claude : ${e.message}` }))
+    child.on('close', async (code) => {
+      clearInterval(watchdog)
+      if (leftovers) clearTimeout(leftovers)
+      // claude est sorti : ce qu'il a lancé et laissé tourner (app, Metro, émulateur…) part avec lui.
+      cleanupGroup(child.pid)
+      if (buf.trim()) handle(buf.trim())
+      // Bloqué : on reprend sa session une fois, en lui disant ce qui s'est passé, plutôt que d'échouer.
+      if (stalled && !relaunched && run.sessionId && run.status === 'running') {
+        relaunched = true
+        launch(STALL_RESUME_PROMPT, run.sessionId)
+        return
+      }
+      clearInterval(flush)
+      if (run.status !== 'cancelled') {
+        if (stalled) push({ t: 'error', text: 'Toujours bloqué après une relance : arrêté.' })
+        // Arrêté par Shipyard après son résultat (tâches de fond restées ouvertes) : le travail est fait, ce n'est pas un échec.
+        const ok = (code === 0 || resultDelivered) && !run.events.some((e) => e.t === 'error') && (!spec.schema || run.structured != null)
+        run.status = ok ? 'success' : 'error'
+        if (!ok && stderr.trim()) push({ t: 'error', text: stderr.trim().slice(-800) })
+        if (!ok && spec.schema && run.structured == null && code === 0) push({ t: 'error', text: 'Pas de sortie structurée.' })
+      }
+      if (run.status === 'success' && spec.onSuccess) {
+        try {
+          push({ t: 'info', text: 'Application du résultat…' })
+          await spec.onSuccess(run)
+        } catch (e) {
+          run.status = 'error'
+          push({ t: 'error', text: (e as Error).message })
         }
       }
-    } else if (msg.type === 'result') {
-      run.costUsd = msg.total_cost_usd ?? null
-      run.result = typeof msg.result === 'string' ? msg.result : null
-      run.structured = msg.structured_output ?? null
-      if (msg.is_error || msg.subtype !== 'success') push({ t: 'error', text: `Fin en erreur : ${msg.subtype}${msg.result ? ` — ${String(msg.result).slice(0, 300)}` : ''}` })
-      else resultDelivered = true
-      leftovers ??= setTimeout(() => {
-        if (child.exitCode != null || run.status !== 'running') return
-        push({ t: 'info', text: 'Résultat rendu, mais des tâches de fond tournaient encore (serveurs de test…) : Shipyard les arrête.' })
-        killTree(child)
-      }, RESULT_GRACE_MS)
-    }
+      run.endedAt = new Date().toISOString()
+      push({ t: 'info', text: run.status === 'success' ? 'Terminé.' : run.status === 'cancelled' ? 'Arrêté.' : 'Échec.' })
+      save(run)
+      bus.emit('end', run)
+      live.delete(run.id)
+      notifyEnd(run)
+    })
   }
 
-  child.on('error', (e) => push({ t: 'error', text: `Impossible de lancer claude : ${e.message}` }))
-  child.on('close', async (code) => {
-    clearInterval(flush)
-    if (leftovers) clearTimeout(leftovers)
-    // claude est sorti : ce qu'il a lancé et laissé tourner (app, Metro, émulateur…) part avec lui.
-    cleanupGroup(child.pid)
-    if (buf.trim()) handle(buf.trim())
-    if (run.status !== 'cancelled') {
-      // Arrêté par Shipyard après son résultat (tâches de fond restées ouvertes) : le travail est fait, ce n'est pas un échec.
-      const ok = (code === 0 || resultDelivered) && !run.events.some((e) => e.t === 'error') && (!spec.schema || run.structured != null)
-      run.status = ok ? 'success' : 'error'
-      if (!ok && stderr.trim()) push({ t: 'error', text: stderr.trim().slice(-800) })
-      if (!ok && spec.schema && run.structured == null && code === 0) push({ t: 'error', text: 'Pas de sortie structurée.' })
-    }
-    if (run.status === 'success' && spec.onSuccess) {
-      try {
-        push({ t: 'info', text: 'Application du résultat…' })
-        await spec.onSuccess(run)
-      } catch (e) {
-        run.status = 'error'
-        push({ t: 'error', text: (e as Error).message })
-      }
-    }
-    run.endedAt = new Date().toISOString()
-    push({ t: 'info', text: run.status === 'success' ? 'Terminé.' : run.status === 'cancelled' ? 'Arrêté.' : 'Échec.' })
-    save(run)
-    bus.emit('end', run)
-    live.delete(run.id)
-    notifyEnd(run)
-  })
-
+  // Le prompt passe par stdin : un diff de PR peut dépasser la taille max d'un argument.
+  launch(spec.prompt, spec.resume)
   return run
 }

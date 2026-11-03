@@ -64,9 +64,11 @@ export function startAndroidRecorder(dir: string, tag: string): AndroidRecorder 
       const remote = `/sdcard/shipyard-${tag}-${segments.length}.mp4`
       segments.push(remote)
       if (!startedAt) startedAt = Date.now()
+      const at = Date.now()
       child = spawn('adb', ['-s', serial, 'shell', 'screenrecord', '--time-limit', '170', remote], { stdio: 'ignore' })
       await new Promise((r) => child!.once('exit', r))
-      if (!stopped) await sleep(200)
+      // Un screenrecord qui échoue d'emblée (émulateur qui démarre, stockage plein) : on attend avant de réessayer.
+      if (!stopped) await sleep(Date.now() - at < 5_000 ? 3_000 : 200)
     }
   })()
   return {
@@ -82,7 +84,8 @@ export function startAndroidRecorder(dir: string, tag: string): AndroidRecorder 
         const file = join(dir, `android-${i}.mp4`)
         const ok = await adb(['pull', remote, file], serial).then(() => true, () => false)
         await adb(['shell', 'rm', '-f', remote], serial).catch(() => undefined)
-        if (ok && existsSync(file) && statSync(file).size > 1_000) local.push(file)
+        // Un segment coupé net (émulateur arrêté ou redémarré) n'est pas lisible et ferait échouer tout le montage.
+        if (ok && existsSync(file) && statSync(file).size > 1_000 && (await videoDuration(file)) > 0) local.push(file)
       }
       if (!local.length) return null
       const full = join(dir, 'android-full.mp4')
@@ -124,7 +127,8 @@ export async function trimAroundActions(input: string, output: string, actions: 
   // Rien à gagner : la vidéo est déjà presque entièrement faite d'actions.
   if (kept > duration * 0.9) return false
   const select = windows.map(([s, e]) => `between(t,${s.toFixed(2)},${e.toFixed(2)})`).join('+')
-  await run('ffmpeg', ['-y', '-i', input, '-vf', `select='${select}',setpts=N/FRAME_RATE/TB`, '-an', '-r', '25', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output], { timeoutMs: 600_000 })
+  // fps d'abord : screenrecord ne produit une image que quand l'écran change, la sélection doit compter en temps réel.
+  await run('ffmpeg', ['-y', '-i', input, '-vf', `fps=25,select='${select}',setpts=N/FRAME_RATE/TB`, '-an', '-r', '25', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output], { timeoutMs: 600_000 })
   return existsSync(output)
 }
 

@@ -41,6 +41,8 @@ export const qk = {
   /** Rapports des bots (contrôles) : sous ['threads'], rechargés avec les fils de la PR. */
   checks: (project: string, wt: string) => ['threads', project, wt, 'checks'] as const,
   threads: (project: string, wt?: string) => (wt ? ['threads', project, wt] as const : ['threads', project] as const),
+  /** Sous la clé des fils : rafraîchis avec eux. */
+  generalComments: (project: string, wt: string) => ['threads', project, wt, 'general'] as const,
   pendingReview: (project: string, wt: string) => ['pending-review', project, wt] as const,
   ticketStates: (project: string) => ['ticket-states', project] as const,
   branches: (project: string) => ['branches', project] as const,

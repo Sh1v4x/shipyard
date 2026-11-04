@@ -1,4 +1,4 @@
-import type { ActionsBlock, TimelineEvent, CheckState, CiJob, CiSummary, DiffFile, PendingReview, PullRequest, ReviewDraftComment, ReviewEvent, ReviewThread, ReviewerCandidate } from '../../shared/types.ts'
+import type { ActionsBlock, TimelineEvent, CheckState, CiJob, CiSummary, DiffFile, PendingReview, PullRequest, ReviewDraftComment, ReviewEvent, ReviewThread, ReviewerCandidate, GeneralComment } from '../../shared/types.ts'
 import { join } from 'node:path'
 import { run, runJson, ttlCache } from './exec.ts'
 import { DATA_DIR } from './config.ts'
@@ -641,6 +641,25 @@ export async function createPr(cwd: string, opts: { title: string; body: string;
 
 export async function requestReviewers(repo: string, num: number, reviewers: string[]) {
   await gh(['api', `repos/${repo}/pulls/${num}/requested_reviewers`, '-X', 'POST', '--input', '-'], { input: JSON.stringify({ reviewers }) })
+}
+
+const generalCache = ttlCache<GeneralComment[]>(30_000)
+
+/** Commentaires généraux de la PR (textes de review et conversation), du plus ancien au plus récent, sans les bots. */
+export function generalComments(repo: string, num: number, force = false): Promise<GeneralComment[]> {
+  return generalCache.get(`${repo}#${num}`, async () => {
+    type Node = { author: { login: string } | null; body: string; url: string }
+    const data = await graphql<{ repository: { pullRequest: { reviews: { nodes: (Node & { state: string; submittedAt: string | null })[] }; comments: { nodes: (Node & { createdAt: string })[] } } } }>(
+      'query($owner:String!,$name:String!,$num:Int!){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(last:100){nodes{author{login} state body submittedAt url}} comments(last:100){nodes{author{login} body createdAt url}}}}}',
+      { ...split(repo), num },
+    )
+    const human = (n: Node) => !!n.author && !/\[bot\]$|^coderabbitai$/.test(n.author.login) && !!n.body.trim()
+    const pr = data.repository.pullRequest
+    return [
+      ...pr.reviews.nodes.filter((r) => human(r) && r.submittedAt).map((r): GeneralComment => ({ kind: 'review', author: r.author!.login, body: r.body.trim(), state: r.state, at: r.submittedAt!, url: r.url })),
+      ...pr.comments.nodes.filter(human).map((c): GeneralComment => ({ kind: 'comment', author: c.author!.login, body: c.body.trim(), state: null, at: c.createdAt, url: c.url })),
+    ].sort((a, b) => a.at.localeCompare(b.at))
+  }, force)
 }
 
 const candidatesCache = ttlCache<ReviewerCandidate[]>(600_000)

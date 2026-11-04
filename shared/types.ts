@@ -353,6 +353,20 @@ export interface TestsSummary {
   manual: { done: number; total: number; at: string } | null
 }
 
+/**
+ * Commentaire général de la PR, attaché à aucune ligne : texte d'une review (souvent le contexte des commentaires
+ * de ligne, ex. « ici »), ou commentaire de la conversation. Bots exclus.
+ */
+export interface GeneralComment {
+  kind: 'review' | 'comment'
+  author: string
+  body: string
+  /** Review : son verdict (APPROVED, CHANGES_REQUESTED, COMMENTED…), null pour un commentaire. */
+  state: string | null
+  at: string
+  url: string
+}
+
 /** Personne à qui demander une review de ma PR ; suggested : proposée par GitHub (elle connaît le code touché). */
 export interface ReviewerCandidate {
   login: string

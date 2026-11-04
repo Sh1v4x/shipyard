@@ -2,7 +2,7 @@
 name: Corriger un commentaire de review
 group: Ma PR
 when: Worktree › Commentaires › Accepter : corriger et répondre DONE
-vars: [comment.file, comment.line, comment.author, comment.body, audit.action, linked, lang.app]
+vars: [comment.file, comment.line, comment.author, comment.body, audit.action, general, linked, lang.app]
 permissionMode: acceptEdits
 allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(git show *), Bash(npm run *), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *), Bash(git -C * diff*), Bash(git -C * status*), Bash(git -C * log*)]
 ---
@@ -12,6 +12,8 @@ allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git diff *), Bash(git status 
 > {comment.body}
 
 Approved fix to apply: {audit.action}
+
+{general}
 
 {linked}
 

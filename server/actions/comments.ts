@@ -10,12 +10,24 @@ import { DIFFS_DIR, type WorktreeActions, linkedContext, linkedFixText, linkedFo
  * Corrige un commentaire de review, puis commite, pousse, répond « DONE <commit> » et résout le fil.
  * Worktrees liés : l'agent peut les adapter quand la correction l'exige (voir commitLinked).
  */
+/** Commentaires généraux de la PR pour un prompt : le contexte des commentaires de ligne (« ici », « pareil qu'au-dessus »). */
+async function generalText(repo: string, num: number): Promise<string> {
+  const list = await gh.generalComments(repo, num, true).catch(() => [])
+  if (!list.length) return ''
+  return [
+    '## General PR comments (not attached to a line)',
+    'Context for the line comments above: a reviewer often explains there what a short line comment ("here", "same") means.',
+    ...list.map((g) => `- ${g.author} (${g.kind === 'review' ? `review, ${g.state?.toLowerCase().replace('_', ' ')}` : 'comment'}): ${g.body.replace(/\n/g, '\n  ')}`),
+  ].join('\n')
+}
+
 async function commentFixSpec(d: WorktreeDetail, thread: ReviewThread, action: string, scope: RunScope, cwd: string): Promise<RunSpec> {
   const first = thread.comments[0]
   const fix = await linkedForFix(d)
   return specFrom('comment-fix', {
     'comment.file': thread.path, 'comment.line': thread.line, 'comment.author': first?.author, 'comment.body': first?.body, 'audit.action': action,
     linked: linkedFixText(fix.linked),
+    general: d.pr ? await generalText(d.project.repo, d.pr.number) : '',
   }, {
     kind: 'comment-fix', title: `Corriger le commentaire de ${first?.author}`, scope: { ...scope, ref: thread.id }, cwd, schema: schemas.fixSchema,
     addDirs: fix.linked.map((l) => l.worktree.path),
@@ -63,7 +75,7 @@ export const commentsActions: WorktreeActions = {
       ].join('\n'))
       .join('\n\n')
     const linked = await linkedContext(d, 'comments')
-    return startRun(specFrom('comments-analyze', { ...vars, context, linked: linked.text }, { kind, title: `Analyse des commentaires #${pr.number}`, scope, cwd, schema: schemas.commentsSchema, addDirs: linked.dirs }))
+    return startRun(specFrom('comments-analyze', { ...vars, context, general: await generalText(project.repo, pr.number), linked: linked.text }, { kind, title: `Analyse des commentaires #${pr.number}`, scope, cwd, schema: schemas.commentsSchema, addDirs: linked.dirs }))
   },
   'comment-fix': async ({ input, project, d, scope, cwd, needPr }) => {
     const pr = needPr()
@@ -116,6 +128,7 @@ export const commentsActions: WorktreeActions = {
             `Validated fix: ${action}`,
           ].join('\n')).join('\n\n'),
           linked: linkedFixText(fix.linked),
+          general: await generalText(project.repo, pr.number),
         }, {
           kind, title: `Corrections · ${fixes.length} commentaire(s)`, scope: { ...scope, ref: 'fix-all-part' }, cwd, schema: schemas.commentsFixAllSchema,
           addDirs: fix.linked.map((l) => l.worktree.path), resume: session,
@@ -167,6 +180,8 @@ export const commentsActions: WorktreeActions = {
             }
           }
         }
+        // Le compteur suivait la liste de tâches de l'agent, qui n'en tient pas toujours une : il finit sur le résultat réel.
+        ctx.log({ t: 'progress', done: results.filter((x) => x.verdict === 'fix' && x.ok).length, total: fixes.length, label: 'commentaires corrigés', at: Date.now() })
       }
       gh.clearPrCache(project.repo)
       return { results }

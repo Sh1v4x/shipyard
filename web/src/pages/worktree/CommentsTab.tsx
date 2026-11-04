@@ -1,12 +1,12 @@
 import { CheckCheckIcon, CheckIcon, ChevronRightIcon, FileIcon, Link2Icon, PlayIcon, SparklesIcon, WrenchIcon } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import type { CommentAudit, CommentReplyOutput, CommentsFixAllOutput, CommentsOutput, FixOutput, ReviewThread } from '../../../../shared/types.ts'
+import type { GeneralComment, CommentAudit, CommentReplyOutput, CommentsFixAllOutput, CommentsOutput, FixOutput, ReviewThread } from '../../../../shared/types.ts'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Label as FieldLabel } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useDismissInbox, useReplyThread } from '../../data/mutations.ts'
-import { useThreads } from '../../data/queries.ts'
+import { useGeneralComments, useThreads } from '../../data/queries.ts'
 import { useAction } from '../../data/runs.ts'
 import { go } from '../../router.ts'
 import { Avatar, Badge, ErrorBox, PromptMenu, RunPanel, Spinner, SuccessBox, plural, useToast } from '../../ui.tsx'
@@ -16,6 +16,7 @@ import { Markdown, plain, suggestionOf } from '../../components/Markdown.tsx'
 
 export function CommentsTab({ project, wtId }: TabProps) {
   const q = useThreads(project.id, wtId)
+  const general = useGeneralComments(project.id, wtId)
   const analysis = useAction<CommentsOutput>('comments-analyze', { project: project.id, worktree: wtId })
   const fixAll = useAction<CommentsFixAllOutput>('comments-fix-all', { project: project.id, worktree: wtId, ref: 'fix-all' })
 
@@ -58,6 +59,7 @@ export function CommentsTab({ project, wtId }: TabProps) {
           <PromptMenu items={[['comments-analyze', 'Analyse des commentaires'], ['comment-fix', 'Correction d’un commentaire']]} />
         </span>
       </div>
+      {general.data && general.data.length > 0 && <GeneralComments comments={general.data} />}
       <RunPanel id={analysis.id} events={analysis.events} running={analysis.running} run={analysis.run} label="Claude vérifie chaque commentaire dans le code" onStop={analysis.stop} action={analysis} />
       {crossRepo.length > 0 && (
         <div className="flex flex-col gap-2 rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
@@ -116,6 +118,39 @@ function Fold({ title, children }: { title: string; children: ReactNode }) {
 }
 
 const ignoredKey = (id: string) => `devpanel:thread-ignored:${id}`
+const VERDICT: Record<string, { label: string; tone: 'green' | 'red' | 'gray' }> = {
+  APPROVED: { label: 'a approuvé', tone: 'green' },
+  CHANGES_REQUESTED: { label: 'demande des changements', tone: 'red' },
+  COMMENTED: { label: 'a commenté', tone: 'gray' },
+}
+
+/**
+ * Commentaires généraux de la PR : le texte d'une review ou de la conversation, attaché à aucune ligne.
+ * C'est souvent là que le reviewer explique ses commentaires de ligne courts (« ici »). L'analyse et les corrections les lisent aussi.
+ */
+function GeneralComments({ comments }: { comments: GeneralComment[] }) {
+  return (
+    <details open className="group overflow-hidden rounded-xl border bg-card">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+        <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
+        Commentaires généraux · {comments.length}
+        <span className="font-normal text-muted-foreground">attachés à aucune ligne : le contexte des commentaires ci-dessous</span>
+      </summary>
+      {comments.map((g) => (
+        <div key={g.url} className="flex flex-col gap-1.5 border-t px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Avatar login={g.author} size="sm" />
+            <span className="font-medium">{g.author}</span>
+            {g.state && VERDICT[g.state] ? <Badge tone={VERDICT[g.state].tone}>{VERDICT[g.state].label}</Badge> : <Badge tone="gray">{g.kind === 'review' ? 'review' : 'conversation'}</Badge>}
+            <a href={g.url} target="_blank" rel="noreferrer" className="ml-auto text-xs text-muted-foreground hover:underline">Voir sur GitHub ↗</a>
+          </div>
+          <Markdown text={g.body} />
+        </div>
+      ))}
+    </details>
+  )
+}
+
 function isIgnored(id: string) {
   try {
     return localStorage.getItem(ignoredKey(id)) === '1'

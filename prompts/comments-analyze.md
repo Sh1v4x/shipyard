@@ -2,7 +2,7 @@
 name: Analyse des commentaires
 group: Ma PR
 when: Worktree › Commentaires › Analyser les commentaires
-vars: [pr.number, pr.title, ticket.id, context, linked, lang.app, lang.github]
+vars: [pr.number, pr.title, ticket.id, context, general, linked, lang.app, lang.github]
 model: sonnet
 allowedTools: [Read, Grep, Glob, Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git -C * diff*), Bash(git -C * log*)]
 ---
@@ -26,5 +26,7 @@ Write audit, action and linkedImpact in {lang.app} (keep technical terms in Engl
 Copy the provided threadId exactly for each thread. Do not modify any file. Return the result via StructuredOutput.
 
 {context}
+
+{general}
 
 {linked}

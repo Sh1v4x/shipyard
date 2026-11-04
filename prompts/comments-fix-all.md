@@ -2,7 +2,7 @@
 name: Corriger tous les commentaires
 group: Ma PR
 when: Worktree › Commentaires › Tout accepter
-vars: [comments, linked, lang.app]
+vars: [comments, general, linked, lang.app]
 permissionMode: acceptEdits
 allowedTools: [Read, Grep, Glob, Edit, Write, TodoWrite, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(git show *), Bash(npm run *), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *), Bash(git -C * diff*), Bash(git -C * status*), Bash(git -C * log*)]
 disallowedTools: [Bash(git commit *), Bash(git push *), Bash(git add *), Bash(git reset *), Bash(git stash *), Bash(git checkout *), Bash(git restore *), Bash(git clean *)]
@@ -11,6 +11,8 @@ disallowedTools: [Bash(git commit *), Bash(git push *), Bash(git add *), Bash(gi
 The user approved the fixes below, on the review comments of their PR. Apply them all, one after the other, in this worktree. Start by creating with TodoWrite one task per comment (one per threadId, in order), and mark each task completed as soon as its comment is handled (fixed, already fixed or impossible): The user follows the progress live. If you just analyzed these comments, use what you already read: don't re-explore the code.
 
 {comments}
+
+{general}
 
 {linked}
 

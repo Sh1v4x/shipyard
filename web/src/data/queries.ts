@@ -1,7 +1,7 @@
 import { useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type {
   ActionKind, ActionsBlock, DiffLine, AgentProcesses, BrokenWorktree, CheckReport, SdkStatus, DigestInfo, LocalTicket, BranchInfo, ClaudeUsage, Credentials, InboxItem, Note, Settings, CreatedTicket, LinearMeta, PendingReview, PrFiles, Project, ProjectOverview, PromptInfo, PromptSource, PromptVersion, ReviewDecisions, StatsReport, StatsScope, ReviewThread,
-  ManualEnv, ReviewerCandidate, Run, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
+  ManualEnv, GeneralComment, ReviewerCandidate, Run, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
 } from '../../../shared/types.ts'
 import { DEFAULT_LABEL_RULES } from '../../../shared/review.ts'
 import { inboxToQueue, queueCount } from '../../../shared/queue.ts'
@@ -188,6 +188,10 @@ export const usePrFiles = (project: string, wt: string) =>
 
 export const useThreads = (project: string, wt: string, enabled = true) =>
   useQuery({ queryKey: qk.threads(project, wt), queryFn: () => api<ReviewThread[]>(`${wtPath(project, wt)}/threads`), enabled })
+
+/** Commentaires généraux de la PR (textes de review, conversation), attachés à aucune ligne. */
+export const useGeneralComments = (project: string, wt: string) =>
+  useQuery({ queryKey: qk.generalComments(project, wt), queryFn: () => api<GeneralComment[]>(`${wtPath(project, wt)}/general-comments`) })
 
 /** À qui demander une review de ma PR (suggestions de GitHub d'abord). */
 export const useReviewerCandidates = (project: string, wt: string, enabled: boolean) =>

@@ -198,6 +198,12 @@ worktreesRoutes.post(`${wt}/merge/finish`, async (c) => {
   return c.json({ url: `https://github.com/${p.repo}/commit/${sha}` })
 })
 
+worktreesRoutes.get(`${wt}/reviewer-candidates`, async (c) => {
+  const p = getProject(c.req.param('id'))
+  const pr = await svc.worktreePr(p, c.req.param('wt'))
+  return c.json(pr ? await gh.reviewerCandidates(p.repo, pr.number, pr.author, force(c)) : [])
+})
+
 worktreesRoutes.post(`${wt}/rerequest`, async (c) => {
   const { reviewers } = await jsonBody(c, inputs.rerequestInput)
   return c.json(await svc.rerequestReview(getProject(c.req.param('id')), c.req.param('wt'), reviewers))

@@ -1,4 +1,4 @@
-import { awaitsReview, labelWithRole, needsChanges, needsTesting, reviewersToRerequest } from './review.ts'
+import { awaitsReview, labelWithRole, needsChanges, needsReviewer, needsTesting, reviewersToRerequest } from './review.ts'
 import { since, waitingInfo } from './timeline.ts'
 import type { Ghost, InboxItem, LabelRules, ProjectOverview, PullRequest, QueueGroup, QueueItem, QueueTone, Ticket, Worktree } from './types.ts'
 import { plural } from './text.ts'
@@ -35,6 +35,7 @@ function myPrReasons(pr: PullRequest, rules: LabelRules): (Reason & { tab: strin
     const who = reviewersToRerequest(pr, rules)
     if (who.length) out.push({ label: `${who.join(', ')} à relancer`, tone: 'amber', tab: 'reviewers', action: 'Relancer' })
   }
+  if (needsReviewer(pr, rules)) out.push({ label: 'Aucun reviewer', tone: 'amber', tab: 'reviewers', action: 'Demander une review' })
   return out
 }
 

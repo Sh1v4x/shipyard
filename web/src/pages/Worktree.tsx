@@ -9,8 +9,8 @@ import { PrTimeline } from '../components/PrTimeline.tsx'
 import type { CheckReport, LabelRules, Project, PullRequest, ReviewThread, SdkStatus, TestsSummary, Worktree, WorktreeDetail } from '../../../shared/types.ts'
 import { useFinishWorktree, useOpenInEditor, useRemoveWorktree, useRerequestReview, useSetGhost, useWakeGhost } from '../data/mutations.ts'
 import { usePins } from '../data/pins.ts'
-import { useChecks, useHealth, useLabelRules, useProjectOverview, useSdkStatus, useThreads, useWorktreeDetail } from '../data/queries.ts'
-import { awaitsReview, labelWithRole, needsChanges, needsTesting } from '../../../shared/review.ts'
+import { useChecks, useHealth, useLabelRules, useProjectOverview, useReviewerCandidates, useSdkStatus, useThreads, useWorktreeDetail } from '../data/queries.ts'
+import { awaitsReview, labelWithRole, needsChanges, needsReviewer, needsTesting } from '../../../shared/review.ts'
 import { isStale, since, waitingInfo } from '../../../shared/timeline.ts'
 import { go } from '../router.ts'
 import { ghostKey } from '../../../shared/queue.ts'
@@ -299,7 +299,7 @@ function buildSections(state: PrState): Section[] {
     const approved = humans.filter((r) => r.state === 'APPROVED').length
     out.push({
       key: 'reviewers', label: 'Reviewers', group: 'status',
-      ...(humans.some((r) => r.state === 'CHANGES_REQUESTED') ? { state: 'ko', summary: 'changements' } : reviewersToRerequest(pr, rules).length ? { state: 'warn', summary: 'à relancer' } : approved ? { state: 'ok', summary: plural(approved, 'approbation', 'approbations') } : pr.requestedReviewers.length ? { state: 'wait', summary: 'en attente' } : { state: 'wait', summary: 'aucun' }),
+      ...(humans.some((r) => r.state === 'CHANGES_REQUESTED') ? { state: 'ko', summary: 'changements' } : reviewersToRerequest(pr, rules).length ? { state: 'warn', summary: 'à relancer' } : approved ? { state: 'ok', summary: plural(approved, 'approbation', 'approbations') } : pr.requestedReviewers.length ? { state: 'wait', summary: 'en attente' } : needsReviewer(pr, rules) ? { state: 'warn', summary: 'à demander' } : { state: 'wait', summary: 'aucun' }),
     })
     out.push(testsSection(state))
   } else if (pr && w.kind === 'review' && !w.merged) {
@@ -347,6 +347,7 @@ function nextStep({ d, threads, checks, sdk, rules, me }: PrState): NextStep {
     if (needsChanges(pr, rules)) return { tone: 'amber', title: `Label « ${labelWithRole(rules, 'changes', pr.labels)?.name} » sans commentaire ouvert`, detail: 'Une modification est peut-être encore attendue, ou le label est resté.', tab: 'reviewers', label: 'Voir les reviewers' }
     const who = reviewersToRerequest(pr, rules)
     if (who.length) return { tone: 'amber', title: `Commentaires traités : relancer ${who.join(', ')}`, detail: null, tab: 'reviewers', label: 'Relancer la review' }
+    if (needsReviewer(pr, rules)) return { tone: 'amber', title: 'Aucun reviewer sur la PR', detail: 'Personne ne la regarde tant que tu n’as pas demandé de review.', tab: 'reviewers', label: 'Demander une review' }
     if (needsTesting(pr, rules) && !testsDone(d.tests)) return { tone: 'purple', title: 'À tester avant de merger', detail: null, tab: 'tests', label: 'Tester' }
     if (pr.isDraft) return { tone: 'gray', title: 'Brouillon', detail: 'Passe-la en « prête pour review » sur GitHub quand le travail est fini.', url: pr.url, label: 'Ouvrir sur GitHub' }
     if (labelWithRole(rules, 'approved', pr.labels) || pr.reviewDecision === 'APPROVED') return { tone: 'green', title: pr.conflictsUnknown ? 'Approuvée : GitHub vérifie encore les conflits' : 'Prête à merger', detail: null, url: pr.url, label: 'Merger sur GitHub' }
@@ -377,33 +378,89 @@ function ReviewersBar({ project, wtId, pr }: { project: Project; wtId: string; p
   const toRequest = reviewersToRerequest(pr, useLabelRules())
   const rb = prReviewBadge(pr)
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-2.5">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* Les labels de l'équipe font foi : le badge GitHub ne s'affiche qu'en leur absence, pour éviter les doublons. */}
-        <span className="flex flex-wrap items-center gap-1.5">
-          {pr.labels.length ? pr.labels.map((l) => <Label key={l.name} {...l} />) : <Badge tone={rb.tone}>{rb.label}</Badge>}
-          <LabelPicker project={project.id} wtId={wtId} pr={pr} />
-        </span>
-        {[...humans.map((r) => r.login), ...pr.requestedReviewers.filter((r) => !humans.some((h) => h.login === r))].map((login) => {
-          const review = humans.find((h) => h.login === login)
-          const st = pr.requestedReviewers.includes(login) ? { label: 'review redemandée', tone: 'amber' as const } : REVIEW_STATE[review?.state ?? ''] ?? { label: review?.state ?? '', tone: 'gray' as const }
-          return (
-            <span key={login} className="flex items-center gap-1.5 text-sm">
-              <Avatar login={login} size="sm" />
-              {login} <Badge tone={st.tone}>{st.label}</Badge>
-            </span>
-          )
-        })}
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {/* Les labels de l'équipe font foi : le badge GitHub ne s'affiche qu'en leur absence, pour éviter les doublons. */}
+          <span className="flex flex-wrap items-center gap-1.5">
+            {pr.labels.length ? pr.labels.map((l) => <Label key={l.name} {...l} />) : <Badge tone={rb.tone}>{rb.label}</Badge>}
+            <LabelPicker project={project.id} wtId={wtId} pr={pr} />
+          </span>
+          {[...humans.map((r) => r.login), ...pr.requestedReviewers.filter((r) => !humans.some((h) => h.login === r))].map((login) => {
+            const review = humans.find((h) => h.login === login)
+            const st = pr.requestedReviewers.includes(login) ? { label: 'review redemandée', tone: 'amber' as const } : REVIEW_STATE[review?.state ?? ''] ?? { label: review?.state ?? '', tone: 'gray' as const }
+            return (
+              <span key={login} className="flex items-center gap-1.5 text-sm">
+                <Avatar login={login} size="sm" />
+                {login} <Badge tone={st.tone}>{st.label}</Badge>
+              </span>
+            )
+          })}
+        </div>
+        {pr.mine && toRequest.length > 0 && (
+          <Button size="sm" className="max-w-full" disabled={busy} onClick={() => rerequest.mutate(toRequest, {
+            onSuccess: (r) => {
+              const labels = [r.removed.length && `retiré : ${r.removed.join(', ')}`, r.added.length && `ajouté : ${r.added.join(', ')}`].filter(Boolean).join(' · ')
+              toast(`Review redemandée à ${toRequest.join(', ')}${labels ? ` · labels ${labels}` : ''}`)
+            },
+            onError: (e) => toast(e.message, true),
+          })} title="Relance les reviewers qui ont demandé des changements et passe les labels « à corriger » en « en attente de review »">{busy ? <Spinner /> : <RotateCcwIcon />}<span className="truncate">Re-demander une review à {toRequest.join(', ')}</span></Button>
+        )}
       </div>
-      {pr.mine && toRequest.length > 0 && (
-        <Button size="sm" className="max-w-full" disabled={busy} onClick={() => rerequest.mutate(toRequest, {
-          onSuccess: (r) => {
-            const labels = [r.removed.length && `retiré : ${r.removed.join(', ')}`, r.added.length && `ajouté : ${r.added.join(', ')}`].filter(Boolean).join(' · ')
-            toast(`Review redemandée à ${toRequest.join(', ')}${labels ? ` · labels ${labels}` : ''}`)
+      {pr.mine && !pr.isDraft && <RequestReview project={project.id} wtId={wtId} pr={pr} />}
+    </div>
+  )
+}
+
+/**
+ * Demander une review à quelqu'un : les suggestions de GitHub (qui connaissent le code touché) d'abord, puis les autres
+ * membres du dépôt. Mise en avant quand la PR n'a encore aucun reviewer ; repliée sinon, pour en ajouter un.
+ */
+function RequestReview({ project, wtId, pr }: { project: string; wtId: string; pr: PullRequest }) {
+  const toast = useToast()
+  const none = needsReviewer(pr, useLabelRules())
+  const [open, setOpen] = useState(false)
+  const candidates = useReviewerCandidates(project, wtId, none || open)
+  const request = useRerequestReview(project, wtId)
+  const [picked, setPicked] = useState<string[]>([])
+  const taken = new Set([...pr.requestedReviewers, ...pr.reviews.map((r) => r.login)])
+  const list = (candidates.data ?? []).filter((c) => !taken.has(c.login))
+  if (!none && !open) {
+    return <Button variant="link" size="sm" className="h-7 self-start px-0" onClick={() => setOpen(true)}>Demander une review à quelqu’un d’autre</Button>
+  }
+  const toggle = (login: string) => setPicked((p) => (p.includes(login) ? p.filter((x) => x !== login) : [...p, login]))
+  return (
+    <div className={cn('flex flex-col gap-3 rounded-xl border bg-card p-4', none && 'border-amber-500/40')}>
+      <div>
+        <p className="font-semibold">{none ? 'Aucun reviewer sur la PR' : 'Demander une review'}</p>
+        <p className="mt-0.5 text-sm text-muted-foreground">Choisis qui doit la relire. Les personnes suggérées par GitHub connaissent le code touché.</p>
+      </div>
+      {candidates.isLoading ? <span className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />Chargement des membres du dépôt…</span>
+        : candidates.error ? <ErrorBox error={candidates.error} />
+        : (
+          <div className="flex flex-wrap gap-2">
+            {list.map((c) => (
+              <button key={c.login} type="button" aria-pressed={picked.includes(c.login)} onClick={() => toggle(c.login)}
+                className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm transition-colors hover:bg-accent', picked.includes(c.login) && 'border-primary bg-primary/10')}>
+                {picked.includes(c.login) ? <CheckIcon className="size-3.5" /> : <Avatar login={c.login} size="sm" />}
+                {c.name ?? c.login}{c.name && <span className="text-xs text-muted-foreground">{c.login}</span>}
+                {c.suggested && <Badge tone="blue">suggéré</Badge>}
+              </button>
+            ))}
+            {!list.length && <span className="text-sm text-muted-foreground">Personne d’autre à qui demander.</span>}
+          </div>
+        )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" disabled={!picked.length || request.isPending} onClick={() => request.mutate(picked, {
+          onSuccess: () => {
+            toast(`Review demandée à ${picked.join(', ')}`)
+            setPicked([])
+            setOpen(false)
           },
           onError: (e) => toast(e.message, true),
-        })} title="Relance les reviewers qui ont demandé des changements et passe les labels « à corriger » en « en attente de review »">{busy ? <Spinner /> : <RotateCcwIcon />}<span className="truncate">Re-demander une review à {toRequest.join(', ')}</span></Button>
-      )}
+        })}>{request.isPending && <Spinner />}Demander une review{picked.length > 0 && ` · ${picked.length}`}</Button>
+        {!none && <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Annuler</Button>}
+      </div>
     </div>
   )
 }

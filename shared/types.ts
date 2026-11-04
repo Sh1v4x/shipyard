@@ -353,6 +353,13 @@ export interface TestsSummary {
   manual: { done: number; total: number; at: string } | null
 }
 
+/** Personne à qui demander une review de ma PR ; suggested : proposée par GitHub (elle connaît le code touché). */
+export interface ReviewerCandidate {
+  login: string
+  name: string | null
+  suggested: boolean
+}
+
 export interface SelfReviewSummary {
   running: boolean
   /** Date de la dernière auto-review terminée, null si aucune n'a encore abouti. */

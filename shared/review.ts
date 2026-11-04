@@ -60,6 +60,13 @@ export function reviewersToRerequest(pr: { labels: { name: string }[]; reviews: 
     .map((r) => r.login)
 }
 
+/**
+ * Ma PR n'a encore aucun reviewer (ni demandé, ni passé) : personne ne la regarde, c'est à moi d'en demander un.
+ * Pas pour un brouillon, ni pour une PR déjà approuvée par label.
+ */
+export const needsReviewer = (pr: { isDraft: boolean; labels: { name: string }[]; reviews: { login: string }[]; requestedReviewers: string[] }, rules: LabelRules) =>
+  !pr.isDraft && !pr.requestedReviewers.length && !pr.reviews.some((r) => !BOTS.test(r.login)) && !labelWithRole(rules, 'approved', pr.labels)
+
 /** La PR attend une review par label, même si GitHub ne me la redemande pas. */
 export const awaitsReview = (pr: { labels: { name: string }[] }, rules: LabelRules) => !!labelWithRole(rules, 'awaitingReview', pr.labels)
 

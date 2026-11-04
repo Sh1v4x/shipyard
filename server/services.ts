@@ -261,12 +261,12 @@ async function loadOverview(project: Project, force: boolean): Promise<ProjectOv
 // ---------- Worktree ----------
 
 /** PR d'un worktree (numéro et base), depuis la vue en cache : évite de recalculer tout le détail. */
-export async function worktreePr(project: Project, wtId: string): Promise<{ number: number; base: string } | null> {
+export async function worktreePr(project: Project, wtId: string): Promise<{ number: number; base: string; author: string } | null> {
   const ov = await overview(project)
   const wt = ov.worktrees.find((w) => w.id === wtId) ?? ov.worktrees.find((w) => w.path === decodeId(wtId))
   if (!wt?.prNumber) return null
   const pr = [...ov.myPrs, ...ov.reviewPrs].find((p) => p.number === wt.prNumber) ?? (await gh.prByNumber(project.repo, wt.prNumber))
-  return { number: pr.number, base: pr.base }
+  return { number: pr.number, base: pr.base, author: pr.author }
 }
 
 /** Lignes ajoutées / supprimées d'un worktree, pour la barre d'état. */

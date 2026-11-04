@@ -1,7 +1,7 @@
 import { useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type {
   ActionKind, ActionsBlock, DiffLine, AgentProcesses, BrokenWorktree, CheckReport, SdkStatus, DigestInfo, LocalTicket, BranchInfo, ClaudeUsage, Credentials, InboxItem, Note, Settings, CreatedTicket, LinearMeta, PendingReview, PrFiles, Project, ProjectOverview, PromptInfo, PromptSource, PromptVersion, ReviewDecisions, StatsReport, StatsScope, ReviewThread,
-  ManualEnv, Run, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
+  ManualEnv, ReviewerCandidate, Run, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
 } from '../../../shared/types.ts'
 import { DEFAULT_LABEL_RULES } from '../../../shared/review.ts'
 import { inboxToQueue, queueCount } from '../../../shared/queue.ts'
@@ -188,6 +188,10 @@ export const usePrFiles = (project: string, wt: string) =>
 
 export const useThreads = (project: string, wt: string, enabled = true) =>
   useQuery({ queryKey: qk.threads(project, wt), queryFn: () => api<ReviewThread[]>(`${wtPath(project, wt)}/threads`), enabled })
+
+/** À qui demander une review de ma PR (suggestions de GitHub d'abord). */
+export const useReviewerCandidates = (project: string, wt: string, enabled: boolean) =>
+  useQuery({ queryKey: qk.reviewerCandidates(project, wt), queryFn: () => api<ReviewerCandidate[]>(`${wtPath(project, wt)}/reviewer-candidates`), enabled, staleTime: 600_000 })
 
 export const useChecks = (project: string, wt: string, enabled = true) =>
   useQuery({

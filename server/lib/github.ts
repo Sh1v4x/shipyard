@@ -1,4 +1,4 @@
-import type { ActionsBlock, TimelineEvent, CheckState, CiJob, CiSummary, DiffFile, PendingReview, PullRequest, ReviewDraftComment, ReviewEvent, ReviewThread } from '../../shared/types.ts'
+import type { ActionsBlock, TimelineEvent, CheckState, CiJob, CiSummary, DiffFile, PendingReview, PullRequest, ReviewDraftComment, ReviewEvent, ReviewThread, ReviewerCandidate } from '../../shared/types.ts'
 import { join } from 'node:path'
 import { run, runJson, ttlCache } from './exec.ts'
 import { DATA_DIR } from './config.ts'
@@ -641,6 +641,24 @@ export async function createPr(cwd: string, opts: { title: string; body: string;
 
 export async function requestReviewers(repo: string, num: number, reviewers: string[]) {
   await gh(['api', `repos/${repo}/pulls/${num}/requested_reviewers`, '-X', 'POST', '--input', '-'], { input: JSON.stringify({ reviewers }) })
+}
+
+const candidatesCache = ttlCache<ReviewerCandidate[]>(600_000)
+
+/** Qui peut reviewer ma PR : les suggestions de GitHub d'abord, puis les autres membres du dépôt (ni moi, ni les bots). */
+export function reviewerCandidates(repo: string, num: number, author: string, force = false): Promise<ReviewerCandidate[]> {
+  return candidatesCache.get(`${repo}#${num}`, async () => {
+    type User = { login: string; name: string | null }
+    const data = await graphql<{ repository: { assignableUsers: { nodes: User[] }; pullRequest: { suggestedReviewers: { reviewer: User }[] } } }>(
+      'query($owner:String!,$name:String!,$num:Int!){repository(owner:$owner,name:$name){assignableUsers(first:100){nodes{login name}} pullRequest(number:$num){suggestedReviewers{reviewer{login name}}}}}',
+      { ...split(repo), num },
+    )
+    const keep = (u: User) => u.login !== author && !/\[bot\]$|^coderabbitai$/.test(u.login)
+    const suggested = data.repository.pullRequest.suggestedReviewers.map((s) => s.reviewer).filter(keep)
+    const others = data.repository.assignableUsers.nodes.filter((u) => keep(u) && !suggested.some((s) => s.login === u.login))
+      .sort((a, b) => a.login.localeCompare(b.login))
+    return [...suggested.map((u) => ({ ...u, suggested: true })), ...others.map((u) => ({ ...u, suggested: false }))]
+  }, force)
 }
 
 /** Corps de ma dernière PR mergée : sert d'exemple de ton et de niveau de détail. */

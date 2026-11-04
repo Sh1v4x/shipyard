@@ -53,6 +53,7 @@ export const qk = {
   reviewDecisions: (run: string | null) => ['review-decisions', run] as const,
   runVideos: (run: string | null) => ['run-videos', run] as const,
   testDecisions: (run: string | null) => ['test-decisions', run] as const,
+  runInput: (run: string | null) => ['run-input', run] as const,
   testMemory: (project: string) => ['test-memory', project] as const,
   branchTestMemory: (project: string, wt: string) => ['test-memory', project, wt] as const,
   runs: (filter?: { project?: string; worktree?: string; kind?: ActionKind; ref?: string; pr?: number; status?: string }) => (filter ? ['runs', filter] as const : ['runs'] as const),

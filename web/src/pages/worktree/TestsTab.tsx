@@ -1,25 +1,25 @@
-import { BrainIcon, ChevronRightIcon, CircleHelpIcon, ClipboardCopyIcon, FlaskConicalIcon, PencilIcon, PlayIcon, RotateCcwIcon, WrenchIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { BrainIcon, CheckIcon, ChevronRightIcon, CircleHelpIcon, ClipboardCopyIcon, FlaskConicalIcon, PencilIcon, PlayIcon, RotateCcwIcon, WrenchIcon } from 'lucide-react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label as FieldLabel } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useSaveTestMemory, useSetTestDecision } from '../../data/mutations.ts'
-import { useTestDecisions, useTestMemory } from '../../data/queries.ts'
+import { useRunInput, useTestDecisions, useTestMemory } from '../../data/queries.ts'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import type { MultiTestOutput, TestOutput } from '../../../../shared/types.ts'
+import type { MultiTestOutput, TestOutput, TicketWorkOutput } from '../../../../shared/types.ts'
 import { useAction } from '../../data/runs.ts'
-import { go } from '../../router.ts'
 import { Badge, Empty, PromptMenu, RunPanel, Spinner, ago, useToast } from '../../ui.tsx'
 import type { TabProps } from '../Worktree.tsx'
 import { TestVideos } from '../../components/TestVideos.tsx'
 import { ManualTest } from './ManualTest.tsx'
+import { WorkResult } from './TicketAgent.tsx'
 
 const STATUS = { pass: ['Réussi', 'green'], fail: ['Échec', 'red'], warn: ['À vérifier', 'amber'] } as const
 
 export function TestsTab({ project, detail, wtId }: TabProps) {
   const test = useAction<TestOutput | MultiTestOutput>('test', { project: project.id, worktree: wtId })
-  const fixer = useAction('ticket', { project: project.id, worktree: wtId })
+  const fixer = useAction<TicketWorkOutput>('ticket', { project: project.id, worktree: wtId })
   const toast = useToast()
   const mine = detail.worktree.kind !== 'review'
   const r = test.result
@@ -35,12 +35,10 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
     const extra = decided
       ? `The PR test raised a point that the user has settled.${where} Scenario: "${name}". Finding: ${detailText}. The user's decision: ${decided}. Apply this decision with a minimal fix, then rerun the relevant test.`
       : `Fix this failure found by the PR test.${where} Scenario: "${name}". Finding: ${detailText}. Minimal fix, then rerun the relevant test.`
-    const id = await fixer.start({ extra })
-    if (id) {
-      toast('Correctif demandé : suivi dans l’onglet Ticket')
-      go({ page: 'worktree', project: project.id, wt: wtId, tab: 'ticket' })
-    }
+    if (await fixer.start({ extra })) toast('Correctif lancé : il s’affiche sous le point concerné')
   }
+  // Le correctif d'un scénario s'affiche sous lui, sur cette page.
+  const fixFor = (name: string) => <FixInline fixer={fixer} name={name} project={project.id} />
 
   const retest = (name: string, note?: string) =>
     void test.start({ extra: [`Retest only the scenario "${name}"; the others keep their result.`, note, consigne].filter(Boolean).join(' ') })
@@ -99,7 +97,7 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
               </summary>
               <div className="flex flex-col gap-4 border-t p-4">
                 {p.runId && <TestVideos runId={p.runId} endedAt={test.run?.endedAt ?? null} />}
-                {p.output && <TestReport r={p.output} runId={p.runId ?? test.id} where={{ project: project.id, wt: wtId }} onFix={mine ? (n, d, decided) => askFix(n, d, decided, p.projectName) : undefined} onRetest={p.worktree === wtId ? retest : undefined} />}
+                {p.output && <TestReport r={p.output} runId={p.runId ?? test.id} where={{ project: project.id, wt: wtId }} fixFor={fixFor} fixBusy={fixer.busy} onFix={mine ? (n, d, decided) => askFix(n, d, decided, p.projectName) : undefined} onRetest={p.worktree === wtId ? retest : undefined} />}
               </div>
             </details>
           ))}
@@ -107,7 +105,7 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
       ) : (
         <>
           {test.id && test.run && <TestVideos runId={test.id} endedAt={test.run.endedAt} />}
-          {r && <TestReport r={r} runId={test.id} where={{ project: project.id, wt: wtId }} onFix={mine ? askFix : undefined} onRetest={retest} />}
+          {r && <TestReport r={r} runId={test.id} where={{ project: project.id, wt: wtId }} fixFor={fixFor} fixBusy={fixer.busy} onFix={mine ? askFix : undefined} onRetest={retest} />}
         </>
       )}
       <ManualTest project={project} wtId={wtId} consigne={consigne} mine={mine} />
@@ -133,10 +131,12 @@ type Scenario = TestOutput['scenarios'][number]
  * Rapport d'un test : d'abord les points à trancher (le test ne peut pas décider seul), puis la suite et les scénarios.
  * onFix : demander un correctif (sinon, copier pour la review) ; onRetest : rejouer un seul scénario.
  */
-function TestReport({ r, runId, where, onFix, onRetest }: { r: TestOutput; runId: string | null; where: { project: string; wt: string }; onFix?: (name: string, detail: string, decided?: string) => void; onRetest?: (name: string, note?: string) => void }) {
+function TestReport({ r, runId, where, fixFor, fixBusy, onFix, onRetest }: { r: TestOutput; runId: string | null; where: { project: string; wt: string }; fixFor: (name: string) => ReactNode; fixBusy: boolean; onFix?: (name: string, detail: string, decided?: string) => void; onRetest?: (name: string, note?: string) => void }) {
   const toast = useToast()
   const toDecide = r.scenarios.filter((s) => s.status === 'warn')
   const decisions = useTestDecisions(runId)
+  const decidedOf = (name: string) => decisions.data?.[name] ?? readDecision(decisionKey(runId, name))
+  const open = toDecide.filter((s) => !decidedOf(s.name)).length
   const others = r.scenarios.filter((s) => s.status !== 'warn')
   return (
     <div className="flex flex-col gap-4">
@@ -144,10 +144,10 @@ function TestReport({ r, runId, where, onFix, onRetest }: { r: TestOutput; runId
         <section aria-label="À trancher" className="overflow-hidden rounded-xl border border-amber-500/40 bg-amber-500/5">
           <div className="flex items-center gap-2 border-b border-amber-500/30 px-5 py-3">
             <CircleHelpIcon className="size-4 text-amber-600 dark:text-amber-400" />
-            <span className="font-semibold">{toDecide.length > 1 ? `${toDecide.length} points à trancher` : '1 point à trancher'}</span>
-            <span className="text-sm text-muted-foreground">Le test ne peut pas décider seul : choisis une réponse, l’IA applique le correctif si besoin.</span>
+            <span className="font-semibold">{open ? (open > 1 ? `${open} points à trancher` : '1 point à trancher') : 'Points tranchés'}</span>
+            {open > 0 && <span className="text-sm text-muted-foreground">Le test ne peut pas décider seul : choisis une réponse, l’IA applique le correctif ici si besoin.</span>}
           </div>
-          {toDecide.map((s) => <DecisionCard key={s.name} s={s} runId={runId} where={where} decided={decisions.data?.[s.name] ?? readDecision(decisionKey(runId, s.name))} onFix={onFix} onRetest={onRetest} />)}
+          {toDecide.map((s) => <DecisionCard key={s.name} s={s} runId={runId} where={where} decided={decidedOf(s.name)} fix={fixFor(s.name)} fixBusy={fixBusy} onFix={onFix} onRetest={onRetest} />)}
         </section>
       )}
       <div className="overflow-hidden rounded-xl border bg-card">
@@ -166,12 +166,38 @@ function TestReport({ r, runId, where, onFix, onRetest }: { r: TestOutput; runId
             <p className="mt-1.5 text-sm text-muted-foreground">{s.detail}</p>
             {s.status !== 'pass' && (
               onFix
-                ? <Button variant="outline" size="sm" className="mt-2.5" onClick={() => onFix(s.name, s.detail)}><WrenchIcon />Demander un correctif à l’IA</Button>
+                ? <Button variant="outline" size="sm" className="mt-2.5" disabled={fixBusy} onClick={() => onFix(s.name, s.detail)}><WrenchIcon />Demander un correctif à l’IA</Button>
                 : <Button variant="outline" size="sm" className="mt-2.5" onClick={() => navigator.clipboard.writeText(`Test « ${s.name} » : ${s.detail}`).then(() => toast('Copié : à coller dans un commentaire de review'))}><ClipboardCopyIcon />Copier</Button>
             )}
+            {s.status !== 'pass' && <div className="mt-3 empty:hidden">{fixFor(s.name)}</div>}
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Le correctif demandé pour un scénario (réponse à une question ou échec), suivi sur place :
+ * progression, puis compte rendu à approuver ou refuser. Rien n'est commité ni poussé.
+ */
+function FixInline({ fixer, name, project }: { fixer: ReturnType<typeof useAction<TicketWorkOutput>>; name: string; project: string }) {
+  const input = useRunInput(fixer.id)
+  const run = fixer.run
+  const extra = run?.input?.extra ?? input.data?.extra
+  if (!fixer.id || !extra?.includes(`Scenario: "${name}"`)) return null
+  if (!run) return <RunPanel id={fixer.id} events={fixer.events} running={fixer.running} run={null} label="Claude applique ta réponse" defaultOpen onStop={fixer.stop} action={fixer} />
+  if (run.decision === 'approved') return <p className="text-sm text-muted-foreground">Correctif approuvé : commite-le avec la carte Commiter, puis pousse.</p>
+  if (run.decision) return <p className="text-sm text-muted-foreground">Correctif refusé.</p>
+  const planRunId = run.scope.ref ?? null
+  return (
+    <div className="flex flex-col gap-3">
+      <RunPanel id={fixer.id} events={fixer.events} running={fixer.running} run={run} label="Claude applique ta réponse" defaultOpen={fixer.running} onStop={fixer.stop} action={fixer} />
+      {fixer.result && !fixer.busy && (
+        <WorkResult project={project} run={run} result={fixer.result} planRunId={planRunId} restartable
+          onRestart={(feedback) => void fixer.start({ planRunId: planRunId ?? undefined, extra, feedback, resumeFrom: fixer.id ?? undefined })}
+          onRetest={() => void fixer.start({ planRunId: planRunId ?? undefined, extra, retest: true, resumeFrom: fixer.id ?? undefined })} />
+      )}
     </div>
   )
 }
@@ -191,11 +217,15 @@ function readDecision(key: string) {
  * ou une réponse libre. Une réponse qui demande un changement lance le correctif ; « garder » le marque comme tranché.
  * La réponse est gardée sur le run du test : un point tranché ne compte plus dans l'étape « Tests ».
  */
-function DecisionCard({ s, runId, where, decided, onFix, onRetest }: {
+function DecisionCard({ s, runId, where, decided, fix, fixBusy, onFix, onRetest }: {
   s: Scenario
   runId: string | null
   where: { project: string; wt: string }
   decided: string | null
+  /** Le correctif lancé par la réponse, affiché sous elle. */
+  fix: ReactNode
+  /** Un correctif tourne déjà : une réponse qui en demande un autre attend. */
+  fixBusy: boolean
   onFix?: (name: string, detail: string, decided?: string) => void
   onRetest?: (name: string, note?: string) => void
 }) {
@@ -215,39 +245,47 @@ function DecisionCard({ s, runId, where, decided, onFix, onRetest }: {
     if (o.fix) onFix!(s.name, s.detail, `${o.label}. To do: ${o.fix}`)
     save(o.label)
   }
+  // Répondu : la question se replie sur une ligne, le correctif éventuel se suit juste en dessous.
+  if (decided) {
+    return (
+      <div className="flex flex-col gap-3 border-t border-amber-500/20 px-5 py-3 first:border-t-0">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <CheckIcon className="size-4 text-emerald-600 dark:text-emerald-400" />
+          <span className="min-w-0 text-muted-foreground">{s.decision?.question ?? s.name}</span>
+          <Badge tone="green">{decided}</Badge>
+          <Button variant="link" size="sm" className="h-7 px-0" onClick={() => save(null)}>Changer de réponse</Button>
+        </div>
+        <div className="empty:hidden">{fix}</div>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col gap-3 border-t border-amber-500/20 px-5 py-4 first:border-t-0">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-muted-foreground">{s.name}</span>
-        {decided && <Badge tone="green">Tranché : {decided}</Badge>}
-      </div>
+      <span className="text-xs font-medium text-muted-foreground">{s.name}</span>
       {s.decision && <p className="text-[15px] font-semibold leading-snug">{s.decision.question}</p>}
       <p className={cn('text-sm', s.decision ? 'text-muted-foreground' : 'text-foreground')}>{s.detail}</p>
-      {!decided && (
-        <div className="flex flex-col gap-2">
-          {s.decision && <span className="text-xs font-medium text-muted-foreground">Ta réponse</span>}
-          <div className="grid gap-2 sm:grid-cols-2">
-            {options.map((o) => (
-              <button key={o.label} type="button" onClick={() => choose(o)}
-                className="flex flex-col items-start gap-0.5 rounded-lg border bg-card px-3 py-2.5 text-left text-sm transition-colors hover:border-ring hover:bg-accent">
-                <span className="font-medium">{o.label}</span>
-                <span className="text-xs text-muted-foreground">{o.fix ? `Correctif : ${o.fix}` : 'Garder la PR telle quelle'}</span>
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {onFix && <Button size="sm" variant="ghost" onClick={() => setFree(free === null ? '' : null)}><PencilIcon />Autre réponse…</Button>}
-            {onRetest && <Button size="sm" variant="ghost" onClick={() => onRetest(s.name)}><RotateCcwIcon />Retester ce point</Button>}
-          </div>
-          {free !== null && onFix && (
-            <div className="flex flex-col gap-2">
-              <Textarea aria-label={`Ta réponse à « ${s.name} »`} rows={2} value={free} onChange={(e) => setFree(e.target.value)} placeholder="Ex. : garde le choix au niveau transaction, mais affiche le bailleur dans le récapitulatif du Modelo 115." />
-              <div><Button size="sm" disabled={!free.trim()} onClick={() => { onFix(s.name, s.detail, free.trim()); save(free.trim()) }}><WrenchIcon />Appliquer ma réponse</Button></div>
-            </div>
-          )}
+      <div className="flex flex-col gap-2">
+        {s.decision && <span className="text-xs font-medium text-muted-foreground">Ta réponse</span>}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {options.map((o) => (
+            <button key={o.label} type="button" disabled={!!o.fix && !!onFix && fixBusy} onClick={() => choose(o)}
+              className="flex flex-col items-start gap-0.5 rounded-lg border bg-card px-3 py-2.5 text-left text-sm transition-colors hover:border-ring hover:bg-accent disabled:pointer-events-none disabled:opacity-50">
+              <span className="font-medium">{o.label}</span>
+              <span className="text-xs text-muted-foreground">{o.fix ? `Correctif : ${o.fix}` : 'Garder la PR telle quelle'}</span>
+            </button>
+          ))}
         </div>
-      )}
-      {decided && <Button variant="link" size="sm" className="h-7 self-start px-0" onClick={() => save(null)}>Changer de réponse</Button>}
+        <div className="flex flex-wrap gap-2">
+          {onFix && <Button size="sm" variant="ghost" onClick={() => setFree(free === null ? '' : null)}><PencilIcon />Autre réponse…</Button>}
+          {onRetest && <Button size="sm" variant="ghost" onClick={() => onRetest(s.name)}><RotateCcwIcon />Retester ce point</Button>}
+        </div>
+        {free !== null && onFix && (
+          <div className="flex flex-col gap-2">
+            <Textarea aria-label={`Ta réponse à « ${s.name} »`} rows={2} value={free} onChange={(e) => setFree(e.target.value)} placeholder="Ex. : garde le choix au niveau transaction, mais affiche le bailleur dans le récapitulatif du Modelo 115." />
+            <div><Button size="sm" disabled={!free.trim() || fixBusy} onClick={() => { onFix(s.name, s.detail, free.trim()); save(free.trim()) }}><WrenchIcon />Appliquer ma réponse</Button></div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

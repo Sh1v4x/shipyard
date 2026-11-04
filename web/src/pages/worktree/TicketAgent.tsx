@@ -261,11 +261,14 @@ function PlanView({ id, plan, note, feedback, setFeedback, busy, onRevise, onApp
   )
 }
 
-function WorkResult({ project, run, result, planRunId, onRestart, onRetest }: {
+/** Compte rendu d'un travail de l'IA, avec approbation, corrections et refus (onglet Ticket, correctifs du test). */
+export function WorkResult({ project, run, result, planRunId, restartable = !!planRunId, onRestart, onRetest }: {
   project: string
   run: Run
   result: TicketWorkOutput
   planRunId: string | null
+  /** Corrections et re-test possibles : un plan à reprendre, ou une consigne qui en tient lieu. */
+  restartable?: boolean
   onRestart: (feedback: string) => void
   /** Refait la phase de test (app, captures, vérifications) sans toucher au code, et remplace ce compte rendu. */
   onRetest: () => void
@@ -347,8 +350,8 @@ function WorkResult({ project, run, result, planRunId, onRestart, onRetest }: {
       </div>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" disabled={busy} onClick={() => decide('approved')}><CheckIcon />Approuver</Button>
-        <Button size="sm" variant="outline" disabled={busy || !feedback.trim() || !planRunId} onClick={() => onRestart(feedback)}>Demander ces corrections</Button>
-        <Button size="sm" variant="outline" disabled={busy || !planRunId} title="Relance l’app, refait les captures et les vérifications, sans toucher au code : le compte rendu est remplacé" onClick={onRetest}>
+        <Button size="sm" variant="outline" disabled={busy || !feedback.trim() || !restartable} onClick={() => onRestart(feedback)}>Demander ces corrections</Button>
+        <Button size="sm" variant="outline" disabled={busy || !restartable} title="Relance l’app, refait les captures et les vérifications, sans toucher au code : le compte rendu est remplacé" onClick={onRetest}>
           <FlaskConicalIcon />Re-tester
         </Button>
         <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => decide('declined', true)}>Refuser et annuler les modifications</Button>

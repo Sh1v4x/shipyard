@@ -1,7 +1,7 @@
 import { useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type {
   ActionKind, ActionsBlock, DiffLine, AgentProcesses, BrokenWorktree, CheckReport, SdkStatus, DigestInfo, LocalTicket, BranchInfo, ClaudeUsage, Credentials, InboxItem, Note, Settings, CreatedTicket, LinearMeta, PendingReview, PrFiles, Project, ProjectOverview, PromptInfo, PromptSource, PromptVersion, ReviewDecisions, StatsReport, StatsScope, ReviewThread,
-  ManualEnv, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
+  ManualEnv, Run, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
 } from '../../../shared/types.ts'
 import { DEFAULT_LABEL_RULES } from '../../../shared/review.ts'
 import { inboxToQueue, queueCount } from '../../../shared/queue.ts'
@@ -234,6 +234,10 @@ export const useRunningRuns = () =>
 
 export const useReviewDecisions = (run: string | null) =>
   useQuery({ queryKey: qk.reviewDecisions(run), queryFn: () => api<ReviewDecisions>(`/runs/${run}/review-decisions`), enabled: !!run, staleTime: 0 })
+
+/** Paramètres d'un run, connus dès son lancement (le suivi en direct ne les donne qu'à la fin). */
+export const useRunInput = (run: string | null) =>
+  useQuery({ queryKey: qk.runInput(run), queryFn: () => api<Run>(`/runs/${run}`).then((r) => r.input ?? null), enabled: !!run, staleTime: Infinity })
 
 /** Mes réponses aux points « à vérifier » d'un test IA (run d'un dépôt), par nom de scénario. */
 export const useTestDecisions = (run: string | null) =>

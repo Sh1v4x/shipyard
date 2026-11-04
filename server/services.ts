@@ -301,17 +301,22 @@ export async function worktreeDetail(project: Project, wtId: string, force = fal
   const pr = worktree.prNumber ? await gh.prByNumber(project.repo, worktree.prNumber, force) : null
   if (pr) pr.timeline = await gh.prTimeline(project.repo, pr.number, force).catch(warnOn('gh.prTimeline', undefined))
   const base = pr?.base ?? project.baseBranch
+  const own = worktree.kind !== 'review' ? worktree.branch : null
   if (worktree.kind !== 'review') git.refreshBaseInBackground(path, base)
-  const [commitsAhead, dirtyFiles, merge, behindBase] = await Promise.all([
+  // Ma branche sur GitHub : un collègue a pu y pousser des commits.
+  if (own) git.refreshBaseInBackground(path, own)
+  const [commitsAhead, dirtyFiles, merge, behindBase, behindRemote, remoteAuthors] = await Promise.all([
     worktree.kind === 'review' ? Promise.resolve([]) : git.commitsAhead(path, base),
     git.dirtyFiles(path),
     git.mergeState(path),
     worktree.kind === 'review' ? Promise.resolve(0) : git.behindRemote(path, base),
+    own ? git.behindRemote(path, own) : Promise.resolve(0),
+    own ? git.remoteAuthors(path, own) : Promise.resolve([]),
   ])
   const linked = await Promise.all((await linkedWorktrees(worktree)).map(async (l) => ({
     project: l.project.id, name: l.project.name, id: l.worktree.id, path: l.worktree.path, branch: l.worktree.branch, dirtyFiles: await git.dirtyFiles(l.worktree.path).catch(() => []),
   })))
-  return { project, worktree, ticket, pr, commitsAhead, dirtyFiles, merge, behindBase, linked, tests: testsSummary(wtId), selfReview: selfReviewSummary(wtId) }
+  return { project, worktree, ticket, pr, commitsAhead, dirtyFiles, merge, behindBase, behindRemote, remoteAuthors, linked, tests: testsSummary(wtId), selfReview: selfReviewSummary(wtId) }
 }
 
 /**

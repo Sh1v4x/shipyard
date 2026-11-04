@@ -8,7 +8,7 @@ const WORKTREE_TAB: Partial<Record<ActionKind, string>> = {
   'commit-plan': 'ticket', 'commit-exec': 'ticket', 'commit-fix': 'ticket', 'pr-prepare': 'ticket', 'pr-video': 'ticket',
   review: 'review', 'self-review': 'files', 'finding-fix': 'files', 'findings-fix-all': 'files',
   'comments-analyze': 'comments', 'comment-fix': 'comments', 'comments-fix-all': 'comments', 'comment-reply': 'comments', 'followup-check': 'followup',
-  test: 'tests', 'test-part': 'tests', 'test-manual': 'tests', 'test-check': 'tests', 'ci-analyze': 'ci', 'ci-fix': 'ci', 'ci-analyze-all': 'ci', 'ci-fix-all': 'ci', 'sdk-update': 'sdk', 'sdk-publish': 'sdk', 'checks-analyze': 'checks', 'checks-fix': 'checks', 'conflict-resolve': 'conflicts', 'merge-finish': 'conflicts', 'base-sync': 'conflicts', 'dirty-triage': 'conflicts',
+  test: 'tests', 'test-part': 'tests', 'test-manual': 'tests', 'test-check': 'tests', 'ci-analyze': 'ci', 'ci-fix': 'ci', 'ci-analyze-all': 'ci', 'ci-fix-all': 'ci', 'sdk-update': 'sdk', 'sdk-publish': 'sdk', 'checks-analyze': 'checks', 'checks-fix': 'checks', 'conflict-resolve': 'conflicts', 'merge-finish': 'conflicts', 'base-sync': 'conflicts', 'branch-sync': 'conflicts', 'dirty-triage': 'conflicts',
 }
 
 /** Lien interne (#/…) vers l'endroit où traiter le résultat d'un run. */

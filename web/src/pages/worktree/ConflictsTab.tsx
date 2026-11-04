@@ -22,6 +22,10 @@ export function ConflictsTab({ project, detail, wtId }: TabProps) {
   // « Récupérer <base> » : fusion, conflits résolus par l'IA, SDK, commit et push, en une tâche suivie.
   const sync = useAction<BaseSyncOutput>('base-sync', { project: project.id, worktree: wtId, ref: 'base-sync' })
   const canSync = (!merge || base === pr.base) && (detail.behindBase > 0 || !!merge || sync.busy)
+  // Ma branche sur GitHub : des commits poussés par quelqu'un d'autre, à récupérer avant de continuer.
+  const branch = detail.worktree.branch
+  const pull = useAction<BaseSyncOutput>('branch-sync', { project: project.id, worktree: wtId, ref: 'branch-sync' })
+  const showPull = pull.run && (pull.running || pull.run.status !== 'success' || Date.now() - Date.parse(pull.run.endedAt ?? pull.run.startedAt) < 600_000)
   const showSync = sync.run && (sync.running || sync.run.status !== 'success' || Date.now() - Date.parse(sync.run.endedAt ?? sync.run.startedAt) < 600_000)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [notes, setNotes] = useState('')
@@ -54,7 +58,29 @@ export function ConflictsTab({ project, detail, wtId }: TabProps) {
   }
 
   return (
-    <section className="flex flex-col gap-4" aria-label={`À jour avec ${pr.base}`}>
+    <section className="flex flex-col gap-4" aria-label="À jour">
+      {branch && (
+        <Card className="flex-row flex-wrap items-start justify-between gap-4 px-5 py-4">
+          <div className="min-w-0 flex-1 basis-80">
+            {detail.behindRemote > 0 ? (
+              <>
+                <p className="font-semibold"><span className="font-mono text-[13px]">origin/{branch}</span> a {plural(detail.behindRemote, 'commit', 'commits')} que tu n’as pas en local</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {detail.remoteAuthors.length ? `Poussé(s) par ${detail.remoteAuthors.join(', ')}. ` : ''}« Récupérer ma branche » les ramène : la branche avance simplement si tu n’as rien de non poussé, sinon les deux historiques sont fusionnés (conflits résolus par l’IA), puis poussés.
+                </p>
+              </>
+            ) : (
+              <p className="text-muted-foreground">La branche est à jour avec sa version sur GitHub (<span className="font-mono text-[13px]">origin/{branch}</span>).</p>
+            )}
+          </div>
+          {(detail.behindRemote > 0 || pull.busy) && (
+            <Button size="sm" disabled={pull.busy || busy != null || (!!merge && merge.base !== branch)} onClick={() => void pull.start()}>
+              {pull.busy ? <Spinner /> : <GitPullRequestArrowIcon />}Récupérer ma branche · {plural(detail.behindRemote, 'commit', 'commits')}
+            </Button>
+          )}
+        </Card>
+      )}
+      {showPull && <RunPanel id={pull.id} events={pull.events} running={pull.running} run={pull.run} label={`Récupération de origin/${branch}`} onStop={pull.stop} action={pull} />}
       <Card className="flex-row flex-wrap items-start justify-between gap-4 px-5 py-4">
         <div className="min-w-0 flex-1 basis-80">
           {merge ? (

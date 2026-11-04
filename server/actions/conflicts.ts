@@ -162,4 +162,44 @@ export const conflictsActions: WorktreeActions = {
       return { url, conflicts: merge.conflicted.length }
     })
   },
+  'branch-sync': async ({ kind, d, scope, cwd }) => {
+    // Quelqu'un a poussé sur ma branche : ses commits sont récupérés. Sans commit local non poussé, la branche avance
+    // simplement ; sinon fusion de origin/<branche>, conflits résolus par l'IA, commit de fusion et push.
+    const branch = d.worktree.branch
+    if (!branch) throw new HttpError(400, 'Worktree sans branche')
+    const resume = d.merge && d.merge.base === branch ? d.merge : null
+    if (!resume) assertClean(d, `récupérer origin/${branch}`)
+    return startJob({ kind, title: `Récupérer origin/${branch}`, scope: { ...scope, ref: 'branch-sync' } }, async (ctx): Promise<BaseSyncOutput> => {
+      if (!resume) {
+        ctx.log({ t: 'info', text: `Récupération de origin/${branch}…` })
+        await git.fetchBranch(cwd, branch)
+        if (!(await git.behindRemote(cwd, branch))) {
+          ctx.log({ t: 'info', text: 'La branche est déjà à jour avec GitHub.' })
+          return { url: null, conflicts: 0 }
+        }
+        if (!(await git.unpushedCount(cwd, branch)) && (await git.fastForward(cwd, branch))) {
+          ctx.log({ t: 'info', text: 'Aucun commit local à garder : la branche avance sur origin, sans commit de fusion.' })
+          gh.clearPrCache(d.project.repo)
+          return { url: null, conflicts: 0 }
+        }
+        ctx.log({ t: 'info', text: 'Des commits locaux ne sont pas encore poussés : fusion des deux historiques…' })
+      }
+      const merge = resume ?? await git.startMerge(cwd, branch)
+      if (!merge) return { url: null, conflicts: 0 }
+      if (merge.conflicted.length) {
+        ctx.log({ t: 'info', text: `${merge.conflicted.length} fichier(s) en conflit : résolution par l’IA…` })
+        const r = await ctx.runChild(await conflictSpec(d, merge, branch, {
+          answers: AUTO_RESOLVE, title: `Conflits avec origin/${branch}`, scope: { ...scope, ref: 'branch-sync-conflicts' }, resume: null,
+        }))
+        const after = await git.mergeState(cwd)
+        if (r.status !== 'success' || after?.remaining.length) {
+          const left = after?.remaining.length ? ` (${after.remaining.join(', ')})` : ''
+          throw new Error(`Conflits non résolus${left} : la fusion reste en cours, à terminer dans l’onglet À jour.`)
+        }
+        ctx.log({ t: 'info', text: 'Conflits résolus.' })
+      } else ctx.log({ t: 'info', text: 'Fusion sans conflit.' })
+      const url = await finishMergeWithFix(ctx, d, branch, true)
+      return { url, conflicts: merge.conflicted.length }
+    })
+  },
 }

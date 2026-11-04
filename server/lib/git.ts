@@ -74,6 +74,11 @@ export async function fetchOrigin(cwd: string) {
   await git(cwd, ['fetch', 'origin', '--prune'], 120_000)
 }
 
+/** Met à jour origin/<branch> seulement. */
+export async function fetchBranch(cwd: string, branch: string) {
+  await git(cwd, ['fetch', 'origin', branch], 120_000)
+}
+
 export async function addWorktree(
   project: Project,
   opts: { dir: string; branch: string; mode: 'new' | 'existing' | 'pr'; base?: string; prNumber?: number },
@@ -278,8 +283,8 @@ export async function finishMerge(cwd: string, branch: string, log: (text: strin
 
 /** Commits de origin/<branch> absents en local (après un fetch). */
 /**
- * Rafraîchit origin/<base> en arrière-plan, au plus une fois toutes les 5 minutes par dépôt et base :
- * le retard sur la base affiché au chargement suivant est alors à jour, sans ralentir celui-ci.
+ * Rafraîchit origin/<base> (ou la branche elle-même) en arrière-plan, au plus une fois toutes les 5 minutes par dépôt et ref :
+ * le retard affiché au chargement suivant est alors à jour, sans ralentir celui-ci.
  */
 const baseFetchedAt = new Map<string, number>()
 export function refreshBaseInBackground(cwd: string, base: string) {
@@ -331,6 +336,17 @@ function nextDevTypes(cwd: string): string[] {
   }
   walk(cwd, 0)
   return out
+}
+
+/** Auteurs des commits de origin/<branch> absents en local. */
+export async function remoteAuthors(cwd: string, branch: string): Promise<string[]> {
+  const out = await git(cwd, ['log', '--format=%an', `HEAD..origin/${branch}`]).catch(() => '')
+  return [...new Set(out.split('\n').filter(Boolean))]
+}
+
+/** Avance la branche sur origin/<branch> sans commit de fusion ; false si l'historique a divergé. */
+export async function fastForward(cwd: string, branch: string): Promise<boolean> {
+  return git(cwd, ['merge', '--ff-only', `origin/${branch}`], 120_000).then(() => true, () => false)
 }
 
 /** Commits locaux pas encore poussés sur origin/<branch>. */

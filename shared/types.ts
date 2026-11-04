@@ -327,6 +327,10 @@ export interface WorktreeDetail {
   merge: MergeState | null
   /** Commits de la base (origin/<base>, au dernier fetch) absents de la branche : « Récupérer <base> ». */
   behindBase: number
+  /** Commits de ma propre branche sur GitHub (origin/<branche>, au dernier fetch) absents en local : poussés par quelqu'un d'autre. */
+  behindRemote: number
+  /** Auteurs de ces commits. */
+  remoteAuthors: string[]
   /** Worktrees associés (projets du groupe) et leurs fichiers non commités : commités avec ceux-ci. */
   linked?: LinkedDirty[]
   /** Où en sont les tests de la branche (IA et manuel). */
@@ -642,6 +646,7 @@ export type ActionKind =
   | 'checks-analyze'
   | 'hook-fix-plan'
   | 'base-sync'
+  | 'branch-sync'
   | 'findings-fix-all'
   | 'ci-analyze-all'
   | 'ci-fix-all'

@@ -15,7 +15,7 @@ const KIND: Partial<Record<ActionKind, string>> = {
   'comments-analyze': 'Analyse des commentaires', 'comment-fix': 'Correctif (commentaire)', 'comments-fix-all': 'Tout accepter', 'comment-reply': 'Réponse rédigée',
   review: 'Review', 'review-part': 'Review (lot)', test: 'Test', 'test-part': 'Test (un dépôt)', 'ci-analyze': 'Diagnostic CI', 'ci-fix': 'Correctif CI',
   'commit-plan': 'Plan de commits', 'commit-exec': 'Commits', 'commit-fix': 'Correction de hook',
-  'conflict-resolve': 'Résolution de conflits', 'merge-finish': 'Valider et pousser',
+  'conflict-resolve': 'Résolution de conflits', 'merge-finish': 'Valider et pousser', 'base-sync': 'Récupérer la base', 'branch-sync': 'Récupérer ma branche',
 }
 
 type Filter = 'all' | 'error' | 'running'

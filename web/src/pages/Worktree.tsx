@@ -248,12 +248,16 @@ function testsSection({ d, partial, rules }: PrState): Section {
   return { ...base, ...(d.pr && needsTesting(d.pr, rules) ? { state: 'warn', summary: 'à tester' } : { state: 'wait', summary: 'à lancer' }) }
 }
 
-/** Ma branche face à sa base : fusion en cours, conflits, retard (pas encore récupérée), ou à jour. */
+/**
+ * Ma branche face à sa base et à sa propre version sur GitHub (un collègue a pu y pousser) :
+ * fusion en cours, conflits, retard (pas encore récupéré), ou à jour.
+ */
 function baseSection({ d }: PrState, pr: PullRequest): Section {
-  const base = { key: 'conflicts', label: `À jour avec ${pr.base}`, group: 'status' as const }
+  const base = { key: 'conflicts', label: 'À jour', group: 'status' as const }
   if (d.merge) return { ...base, state: 'ko', summary: `${d.merge.remaining.length}/${d.merge.conflicted.length} en conflit` }
-  if (pr.conflicts) return { ...base, state: 'ko', summary: 'conflits' }
-  if (d.behindBase) return { ...base, state: 'warn', summary: `${d.behindBase} en retard` }
+  const late = [d.behindRemote > 0 && `branche ${d.behindRemote}`, d.behindBase > 0 && `${pr.base} ${d.behindBase}`].filter(Boolean).join(' · ')
+  if (pr.conflicts) return { ...base, state: 'ko', summary: late ? `conflits · ${late}` : 'conflits' }
+  if (late) return { ...base, state: 'warn', summary: `en retard : ${late}` }
   if (pr.conflictsUnknown) return { ...base, state: 'run', summary: 'en vérification' }
   return { ...base, state: 'ok', summary: 'à jour' }
 }
@@ -325,6 +329,7 @@ function nextStep({ d, threads, checks, sdk, rules, me }: PrState): NextStep {
   }
   if (pr) {
     if (d.merge?.remaining.length) return { tone: 'red', title: `Fusion de ${d.merge.base ?? pr.base} en cours : ${plural(d.merge.remaining.length, 'fichier en conflit', 'fichiers en conflit')}`, detail: d.merge.remaining.join(', '), tab: 'conflicts', label: 'Résoudre les conflits' }
+    if (d.behindRemote) return { tone: 'amber', title: `${plural(d.behindRemote, 'commit poussé', 'commits poussés')} sur ta branche${d.remoteAuthors.length ? ` par ${d.remoteAuthors.join(', ')}` : ''}`, detail: 'Récupère-les avant de continuer : sinon ton prochain push sera refusé.', tab: 'conflicts', label: 'Récupérer ma branche' }
     if (pr.conflicts) return { tone: 'red', title: `Conflits avec ${pr.base}`, detail: d.behindBase ? `${pr.base} a ${plural(d.behindBase, 'commit', 'commits')} d’avance.` : null, tab: 'conflicts', label: 'Résoudre les conflits' }
     const open = threads ? threads.filter((t) => !t.isResolved && !t.awaitingReviewer && !t.isDraft) : []
     const nOpen = threads ? open.length : pr.unresolvedThreads

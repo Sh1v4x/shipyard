@@ -352,7 +352,7 @@ function WorktreeRow({ item, projectId, pinned }: { item: QueueItem; projectId: 
   return (
     <div className="flex flex-col">
       <div className={cn('group/row flex h-8 shrink-0 items-center gap-1 rounded-md pr-1 pl-1 text-[13px] transition-colors hover:bg-accent', active && 'bg-accent font-medium')}>
-        {item.prNumber ? (
+        {item.prNumber && item.group !== 'clean' ? (
           <button type="button" onClick={toggle} aria-expanded={open} aria-label={open ? 'Replier la liste « Prête à merger »' : 'Déplier la liste « Prête à merger »'}
             className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground">
             <ChevronRightIcon className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
@@ -373,7 +373,7 @@ function WorktreeRow({ item, projectId, pinned }: { item: QueueItem; projectId: 
           {pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
         </button>
       </div>
-    {open && item.prNumber && <div className="mb-1 ml-[22px] border-l pl-1"><ChecklistMini project={projectId} wt={wt} /></div>}
+    {open && item.prNumber && item.group !== 'clean' && <div className="mb-1 ml-[22px] border-l pl-1"><ChecklistMini project={projectId} wt={wt} /></div>}
     </div>
   )
 }
@@ -396,6 +396,43 @@ function NavLink({ to, icon: IconCmp, active, children, aside }: { to: string; i
 }
 
 const WT_OPEN = 'shipyard:sidebarWorktrees'
+const FINISHED_OPEN = 'shipyard:sidebarFinished'
+
+/**
+ * À aboutir : les worktrees terminés de tous les projets (PR mergée ou fermée, ticket clos), à passer en Done et à supprimer.
+ * Une section à part pour les voir d'un coup d'œil, sans les mêler au travail en cours.
+ */
+function FinishedSection({ projects, current }: { projects: Project[]; current?: string }) {
+  const overviews = useProjectOverviews(projects.map((p) => p.id))
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(FINISHED_OPEN) !== '0' } catch { return true }
+  })
+  const toggle = () => setOpen((o) => {
+    try { localStorage.setItem(FINISHED_OPEN, o ? '0' : '1') } catch { /* stockage indisponible */ }
+    return !o
+  })
+  const groups = overviews.data
+    .map((ov) => ({ project: ov.project, rows: (ov.queue ?? []).filter((q) => q.group === 'clean' && q.worktree) }))
+    .filter((g) => g.rows.length)
+    // Le projet courant d'abord.
+    .sort((a, b) => Number(b.project.id === current) - Number(a.project.id === current))
+  const total = groups.reduce((n, g) => n + g.rows.length, 0)
+  if (!total) return null
+  return (
+    <div className="mt-5 flex flex-col gap-0.5">
+      <button type="button" onClick={toggle} aria-expanded={open} className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+        <ChevronRightIcon className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
+        À aboutir · {total}
+      </button>
+      {open && groups.map((g) => (
+        <div key={g.project.id} className="flex flex-col gap-0.5">
+          <span className="px-2.5 pt-2 pb-0.5 text-[11px] text-muted-foreground/80">{g.project.name}</span>
+          {g.rows.map((q) => <WorktreeRow key={q.key} item={q} projectId={g.project.id} pinned={false} />)}
+        </div>
+      ))}
+    </div>
+  )
+}
 const CHECKLIST_OPEN = 'shipyard:sidebarChecklist'
 
 function Sidebar({ projects, current, todo, loading }: { projects: Project[]; current?: Project; todo: number; loading: boolean }) {
@@ -417,6 +454,8 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
     return !o
   })
   const rows = (queue ?? []).filter((q) => q.worktree && q.kind !== 'agent')
+  // Les terminés ont leur section, « À aboutir » (tous projets).
+  const active = rows.filter((r) => r.group !== 'clean')
   const pinnedIds = current ? pins.of(current.id) : []
   const pinned = pinnedIds.map((id) => rows.find((r) => r.worktree === id)).filter((r): r is QueueItem => !!r)
   return (
@@ -488,7 +527,7 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
             <div className="flex items-center justify-between pr-0.5">
               <button type="button" onClick={toggleWt} aria-expanded={wtOpen} className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground">
                 <ChevronRightIcon className={cn('size-3.5 transition-transform', wtOpen && 'rotate-90')} />
-                Worktrees · {rows.length}
+                Worktrees · {active.length}
               </button>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -500,7 +539,7 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
               </Tooltip>
             </div>
             {loading && <span className="flex items-center gap-2 px-2.5 py-1 text-xs text-muted-foreground"><Spinner className="size-3.5" />Chargement…</span>}
-            {wtOpen && QUEUE_GROUPS.map((g) => {
+            {wtOpen && QUEUE_GROUPS.filter((g) => g.key !== 'clean').map((g) => {
               const list = rows.filter((r) => r.group === g.key && !pinnedIds.includes(r.worktree!))
               if (!list.length) return null
               return (
@@ -510,9 +549,11 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
                 </div>
               )
             })}
-            {queue && !rows.length && <p className="px-2.5 py-1 text-xs text-muted-foreground">Aucun worktree pour ce projet.</p>}
+            {queue && !active.length && <p className="px-2.5 py-1 text-xs text-muted-foreground">Aucun worktree pour ce projet.</p>}
           </div>
         )}
+
+        <FinishedSection projects={projects} current={current?.id} />
       </nav>
     </div>
   )

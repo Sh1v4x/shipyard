@@ -6,9 +6,9 @@ import { useAction } from '../../data/runs.ts'
 import { Badge, ErrorBox, RunPanel, Spinner, SuccessBox, plural } from '../../ui.tsx'
 import type { TabProps } from '../Worktree.tsx'
 import { BlockedCommit } from '../../components/BlockedCommit.tsx'
+import { lateSdks } from './checklist.tsx'
 
 /** SDK en retard : pas installé dans sa dernière version, ou des merges pas encore publiés. */
-export const lateSdks = (list: SdkStatus[] | undefined) => (list ?? []).filter((s) => (s.latest && s.locked !== s.latest) || (s.unpublished?.length ?? 0) > 0)
 
 /** Panneau « SDK » du worktree : les SDK privés dont dépend la branche, et de quoi les remettre à jour. */
 export function SdkPanel({ project, detail, wtId }: TabProps) {

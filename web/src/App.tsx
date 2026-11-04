@@ -17,6 +17,7 @@ import { CommandPalette, openPalette } from './components/CommandPalette.tsx'
 import { ConnectionStatus } from './components/ConnectionStatus.tsx'
 import { LocalTicketOrphans } from './components/LocalTicketOrphans.tsx'
 import { StatusBar } from './components/StatusBar.tsx'
+import { ChecklistMini } from './pages/worktree/checklist.tsx'
 import { AddProjectPage } from './pages/AddProject.tsx'
 import { OverviewPage } from './pages/Overview.tsx'
 import { AutomationsPage, CreateWorktreePage, DailyPage, InboxPage, StatsPage, InsightsPage, NewTicketPage, NotesPage, PromptsPage, SettingsPage, WorktreePage, loadWorktreePage } from './pages/lazy.ts'
@@ -339,22 +340,40 @@ function WorktreeRow({ item, projectId, pinned }: { item: QueueItem; projectId: 
   const wt = item.worktree!
   const active = route.page === 'worktree' && route.wt === wt
   const warm = () => { void loadWorktreePage(); void prefetch(projectId, wt) }
+  // Liste « Prête à merger » dépliable sous la ligne d'une PR : son état en direct, chaque point mène à son onglet.
+  const key = `${CHECKLIST_OPEN}:${wt}`
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(key) === '1' } catch { return false }
+  })
+  const toggle = () => setOpen((o) => {
+    try { localStorage.setItem(key, o ? '0' : '1') } catch { /* stockage indisponible */ }
+    return !o
+  })
   return (
-    <div className={cn('group/row flex h-8 shrink-0 items-center gap-2 rounded-md pr-1 pl-2.5 text-[13px] transition-colors hover:bg-accent', active && 'bg-accent font-medium')}>
-      <a href={href({ page: 'worktree', project: projectId, wt })} onMouseEnter={warm} onFocus={warm} aria-current={active ? 'page' : undefined}
-        title={[item.title, ...item.reasons.map((r) => r.label)].join(' · ')} className="flex min-w-0 flex-1 items-center gap-2">
-        <span className={cn('size-2 shrink-0 rounded-full', DOT[item.tone])} aria-hidden />
-        <span className="min-w-0 flex-1 truncate">{item.title}</span>
-        {item.ref && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{item.ref}</span>}
-      </a>
-      <button
-        type="button"
-        onClick={() => pins.toggle(projectId, wt)}
-        aria-label={pinned ? 'Désépingler' : 'Épingler'}
-        className={cn('flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground', !pinned && 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')}
-      >
-        {pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
-      </button>
+    <div className="flex flex-col">
+      <div className={cn('group/row flex h-8 shrink-0 items-center gap-1 rounded-md pr-1 pl-1 text-[13px] transition-colors hover:bg-accent', active && 'bg-accent font-medium')}>
+        {item.prNumber ? (
+          <button type="button" onClick={toggle} aria-expanded={open} aria-label={open ? 'Replier la liste « Prête à merger »' : 'Déplier la liste « Prête à merger »'}
+            className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground">
+            <ChevronRightIcon className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
+          </button>
+        ) : <span className="size-5 shrink-0" aria-hidden />}
+        <a href={href({ page: 'worktree', project: projectId, wt })} onMouseEnter={warm} onFocus={warm} aria-current={active ? 'page' : undefined}
+          title={[item.title, ...item.reasons.map((r) => r.label)].join(' · ')} className="flex min-w-0 flex-1 items-center gap-2">
+          <span className={cn('size-2 shrink-0 rounded-full', DOT[item.tone])} aria-hidden />
+          <span className="min-w-0 flex-1 truncate">{item.title}</span>
+          {item.ref && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{item.ref}</span>}
+        </a>
+        <button
+          type="button"
+          onClick={() => pins.toggle(projectId, wt)}
+          aria-label={pinned ? 'Désépingler' : 'Épingler'}
+          className={cn('flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground', !pinned && 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')}
+        >
+          {pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
+        </button>
+      </div>
+    {open && item.prNumber && <div className="mb-1 ml-[22px] border-l pl-1"><ChecklistMini project={projectId} wt={wt} /></div>}
     </div>
   )
 }
@@ -377,6 +396,7 @@ function NavLink({ to, icon: IconCmp, active, children, aside }: { to: string; i
 }
 
 const WT_OPEN = 'shipyard:sidebarWorktrees'
+const CHECKLIST_OPEN = 'shipyard:sidebarChecklist'
 
 function Sidebar({ projects, current, todo, loading }: { projects: Project[]; current?: Project; todo: number; loading: boolean }) {
   const route = useRoute()

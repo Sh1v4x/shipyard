@@ -164,9 +164,10 @@ const worktreeQuery = (project: string, wt: string) => ({
   queryFn: () => api<WorktreeDetail>(wtPath(project, wt)),
 })
 
-export function useWorktreeDetail(project: string, wt: string) {
+/** poll : relit le détail à cet intervalle (ms), pour un résumé affiché en continu (barre latérale). */
+export function useWorktreeDetail(project: string, wt: string, enabled = true, poll?: number) {
   const qc = useQueryClient()
-  return useQuery({ ...worktreeQuery(project, wt), placeholderData: () => detailFromOverview(qc, project, wt) })
+  return useQuery({ ...worktreeQuery(project, wt), placeholderData: () => detailFromOverview(qc, project, wt), enabled, refetchInterval: poll })
 }
 
 /** Précharge un worktree (survol d'un lien) : la page s'ouvre avec ses données. */

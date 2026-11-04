@@ -1,4 +1,4 @@
-import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, CircleIcon, ClockIcon, CodeIcon, CopyIcon, EllipsisIcon, GhostIcon, GitMergeIcon, Loader2Icon, MinusIcon, PinIcon, PinOffIcon, RotateCcwIcon, Trash2Icon, XIcon, type LucideIcon } from 'lucide-react'
+import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, ClockIcon, CodeIcon, CopyIcon, EllipsisIcon, GhostIcon, GitMergeIcon, PinIcon, PinOffIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
 import { LinkTicket } from '../components/LinkTicket.tsx'
 import { LabelPicker } from '../components/LabelPicker.tsx'
@@ -6,7 +6,7 @@ import { LinkedWorktrees } from '../components/LinkedWorktrees.tsx'
 import { MoveWorktree } from '../components/MoveWorktree.tsx'
 import { TicketStatus } from '../components/TicketStatus.tsx'
 import { PrTimeline } from '../components/PrTimeline.tsx'
-import type { CheckReport, LabelRules, Project, PullRequest, ReviewThread, SdkStatus, TestsSummary, Worktree, WorktreeDetail } from '../../../shared/types.ts'
+import type { Project, PullRequest, Worktree } from '../../../shared/types.ts'
 import { useFinishWorktree, useOpenInEditor, useRemoveWorktree, useRerequestReview, useSetGhost, useWakeGhost } from '../data/mutations.ts'
 import { usePins } from '../data/pins.ts'
 import { useChecks, useHealth, useLabelRules, useProjectOverview, useReviewerCandidates, useSdkStatus, useThreads, useWorktreeDetail } from '../data/queries.ts'
@@ -24,24 +24,14 @@ import { LogsTab } from './worktree/LogsTab.tsx'
 import { CommentsTab } from './worktree/CommentsTab.tsx'
 import { ConflictsTab } from './worktree/ConflictsTab.tsx'
 import { FilesTab } from './worktree/FilesTab.tsx'
-import { FollowupTab, myOpenThreads } from './worktree/FollowupTab.tsx'
+import { FollowupTab } from './worktree/FollowupTab.tsx'
+import { type PrState, type Section, StateDot, buildSections, lateSdks, myOpenThreads, testsDone } from './worktree/checklist.tsx'
 import { ReviewTab } from './worktree/ReviewTab.tsx'
-import { SdkPanel, lateSdks } from './worktree/SdkPanel.tsx'
+import { SdkPanel } from './worktree/SdkPanel.tsx'
 import { TestsTab } from './worktree/TestsTab.tsx'
 import { TicketTab } from './worktree/TicketTab.tsx'
 
-type SectionState = 'ok' | 'ko' | 'warn' | 'run' | 'wait' | 'none'
-interface Section { key: string; label: string; state: SectionState; summary: string; group: 'status' | 'work' }
 interface NextStep { tone: 'red' | 'amber' | 'purple' | 'green' | 'gray' | 'blue'; title: string; detail: string | null; tab?: string; url?: string; label?: string }
-
-const STATE_ICON: Record<SectionState, { icon: LucideIcon; className: string }> = {
-  ok: { icon: CheckIcon, className: 'bg-emerald-500 text-white' },
-  ko: { icon: XIcon, className: 'bg-red-500 text-white' },
-  warn: { icon: CircleIcon, className: 'bg-amber-500 text-white [&_svg]:fill-current [&_svg]:size-1.5' },
-  run: { icon: Loader2Icon, className: 'bg-blue-500 text-white [&_svg]:animate-spin' },
-  wait: { icon: MinusIcon, className: 'bg-muted text-muted-foreground' },
-  none: { icon: MinusIcon, className: 'hidden' },
-}
 
 const NEXT_TONE: Record<NextStep['tone'], string> = {
   red: 'border-red-500/35 bg-red-500/5',
@@ -199,7 +189,6 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
 }
 
 function SectionButton({ s, active, onClick }: { s: Section; active: boolean; onClick: () => void }) {
-  const { icon: StateIcon, className } = STATE_ICON[s.state]
   return (
     <button
       type="button"
@@ -207,116 +196,13 @@ function SectionButton({ s, active, onClick }: { s: Section; active: boolean; on
       onClick={onClick}
       className={cn('flex w-full items-center gap-2.5 border-t px-3 py-2 text-left text-sm transition-colors first:border-t-0 hover:bg-accent', active && 'bg-accent font-medium')}
     >
-      <span className={cn('flex size-4 shrink-0 items-center justify-center rounded-full [&_svg]:size-2.5', className)} aria-hidden><StateIcon strokeWidth={3} /></span>
+      <StateDot state={s.state} />
       <span className="min-w-0 flex-1 truncate">{s.label}</span>
       {s.summary && <span className="shrink-0 text-xs font-normal text-muted-foreground">{s.summary}</span>}
     </button>
   )
 }
 
-interface PrState {
-  d: WorktreeDetail
-  /** Détail provisoire (tiré de la vue du projet) : tests et auto-review encore inconnus. */
-  partial: boolean
-  threads: ReviewThread[] | undefined
-  checks: CheckReport[] | undefined
-  sdk: SdkStatus[] | undefined
-  rules: LabelRules
-  me: string | null
-}
-
-/** Points de la liste de contrôle (status) et sections de travail (work) du worktree, avec leur état. */
-const manualDone = (t: TestsSummary) => !!t.manual && t.manual.done === t.manual.total
-
-/**
- * Tests faits : rien en échec, un test manuel commencé est fini, et les points « à vérifier » du test IA
- * sont couverts par ce test manuel.
- */
-const testsDone = (t: TestsSummary) =>
-  (!!t.ai || !!t.manual) && !t.ai?.failed && (!t.manual || manualDone(t)) && (!t.ai?.toCheck || manualDone(t))
-
-function testsSection({ d, partial, rules }: PrState): Section {
-  const t = d.tests
-  const base = { key: 'tests', label: 'Tests', group: 'status' as const }
-  const manual = t.manual && `manuel ${t.manual.done}/${t.manual.total}`
-  if (partial) return { ...base, state: 'wait', summary: '…' }
-  if (t.running) return { ...base, state: 'run', summary: 'en cours' }
-  if (t.ai?.failed) return { ...base, state: 'ko', summary: `IA : ${plural(t.ai.failed, 'échec', 'échecs')}` }
-  if (t.manual && !manualDone(t)) return { ...base, state: 'warn', summary: manual ?? '' }
-  if (t.ai?.toCheck && !t.manual) return { ...base, state: 'warn', summary: `IA : ${t.ai.toCheck} à vérifier` }
-  if (testsDone(t)) return { ...base, state: 'ok', summary: [t.ai && (t.ai.from ? `IA (via ${t.ai.from})` : 'IA'), manual].filter(Boolean).join(' · ') }
-  return { ...base, ...(d.pr && needsTesting(d.pr, rules) ? { state: 'warn', summary: 'à tester' } : { state: 'wait', summary: 'à lancer' }) }
-}
-
-/**
- * Ma branche face à sa base et à sa propre version sur GitHub (un collègue a pu y pousser) :
- * fusion en cours, conflits, retard (pas encore récupéré), ou à jour.
- */
-function baseSection({ d }: PrState, pr: PullRequest): Section {
-  const base = { key: 'conflicts', label: 'À jour', group: 'status' as const }
-  if (d.merge) return { ...base, state: 'ko', summary: `${d.merge.remaining.length}/${d.merge.conflicted.length} en conflit` }
-  const late = [d.behindRemote > 0 && `branche ${d.behindRemote}`, d.behindBase > 0 && `${pr.base} ${d.behindBase}`].filter(Boolean).join(' · ')
-  if (pr.conflicts) return { ...base, state: 'ko', summary: late ? `conflits · ${late}` : 'conflits' }
-  if (late) return { ...base, state: 'warn', summary: `en retard : ${late}` }
-  if (pr.conflictsUnknown) return { ...base, state: 'run', summary: 'en vérification' }
-  return { ...base, state: 'ok', summary: 'à jour' }
-}
-
-/** Auto-review de ma PR (onglet Fichiers) : à lancer, en cours, remarques à traiter, ou faite. */
-function selfReviewSection({ d, partial }: PrState): Section {
-  const s = d.selfReview
-  const base = { key: 'files', label: 'Self-review', group: 'status' as const }
-  if (partial) return { ...base, state: 'wait', summary: '…' }
-  if (s?.running) return { ...base, state: 'run', summary: 'en cours' }
-  if (!s?.at) return { ...base, state: 'wait', summary: s ? 'à relancer' : 'à lancer' }
-  if (s.pending) return { ...base, state: 'warn', summary: plural(s.pending, 'remarque', 'remarques') }
-  return { ...base, state: 'ok', summary: s.findings ? 'remarques traitées' : 'rien à signaler' }
-}
-
-function buildSections(state: PrState): Section[] {
-  const { d, threads, checks, sdk, rules } = state
-  const { worktree: w, pr } = d
-  const out: Section[] = []
-  const late = lateSdks(sdk)
-  const sdkState: Section = { key: 'sdk', label: 'SDK', group: 'status', ...(!sdk ? { state: 'wait', summary: '…' } : late.length ? { state: 'warn', summary: late[0].latest && late[0].locked !== late[0].latest ? `${late[0].locked} → ${late[0].latest}` : 'à publier' } : { state: 'ok', summary: sdk.length ? 'à jour' : 'aucun' }) }
-  const fresh = (checks ?? []).filter((r) => !r.stale)
-  const checksState: Section = {
-    key: 'checks', label: 'Contrôles', group: 'status',
-    ...(!checks ? { state: 'wait', summary: '…' } : !checks.length ? { state: 'ok', summary: 'aucun' } : fresh.some((r) => r.status === 'fail') ? { state: 'ko', summary: plural(fresh.filter((r) => r.status === 'fail').length, 'échec', 'échecs') } : fresh.some((r) => r.status === 'warn') ? { state: 'warn', summary: 'à regarder' } : fresh.length < checks.length ? { state: 'run', summary: 'en retard' } : { state: 'ok', summary: 'rien à signaler' }),
-  }
-  const ciState = (p: PullRequest): Section => {
-    const jobs = p.ci.jobs.filter((j) => j.state !== 'skipped')
-    const passed = jobs.filter((j) => j.state === 'pass').length
-    return { key: 'ci', label: 'CI', group: 'status', ...(p.ci.failing ? { state: 'ko', summary: `${p.ci.failing} / ${jobs.length} en échec` } : p.ci.state === 'running' ? { state: 'run', summary: `${passed} / ${jobs.length}` } : p.ci.state === 'pass' ? { state: 'ok', summary: `${passed} / ${jobs.length}` } : { state: 'wait', summary: 'aucun check' }) }
-  }
-  if (pr && w.kind === 'mine' && !w.merged) {
-    out.push(selfReviewSection(state))
-    out.push(baseSection(state, pr))
-    const open = threads ? threads.filter((t) => !t.isResolved && !t.awaitingReviewer && !t.isDraft).length : pr.unresolvedThreads
-    out.push({ key: 'comments', label: 'Commentaires', group: 'status', ...(open ? { state: 'ko', summary: `${open} à traiter` } : { state: 'ok', summary: threads?.length ? `${threads.length} traités` : 'aucun' }) })
-    out.push(ciState(pr), sdkState, checksState)
-    const humans = pr.reviews.filter((r) => !/\[bot\]$|^coderabbitai$/.test(r.login))
-    const approved = humans.filter((r) => r.state === 'APPROVED').length
-    out.push({
-      key: 'reviewers', label: 'Reviewers', group: 'status',
-      ...(humans.some((r) => r.state === 'CHANGES_REQUESTED') ? { state: 'ko', summary: 'changements' } : reviewersToRerequest(pr, rules).length ? { state: 'warn', summary: 'à relancer' } : approved ? { state: 'ok', summary: plural(approved, 'approbation', 'approbations') } : pr.requestedReviewers.length ? { state: 'wait', summary: 'en attente' } : needsReviewer(pr, rules) ? { state: 'warn', summary: 'à demander' } : { state: 'wait', summary: 'aucun' }),
-    })
-    out.push(testsSection(state))
-  } else if (pr && w.kind === 'review' && !w.merged) {
-    const mineThreads = myOpenThreads(threads)
-    out.push({ key: 'review', label: 'Review', group: 'status', ...(awaitsReview(pr, rules) || pr.requestedReviewers.length ? { state: 'warn', summary: 'à faire' } : { state: 'ok', summary: 'rendue' }) })
-    if (mineThreads.length || threads?.some((t) => t.byMe && !t.isDraft)) {
-      const replies = mineThreads.filter((t) => !t.awaitingReviewer).length
-      out.push({ key: 'followup', label: 'Suivi des retours', group: 'status', ...(replies ? { state: 'warn', summary: plural(replies, 'réponse', 'réponses') } : mineThreads.length ? { state: 'wait', summary: `${mineThreads.length} ouverts` } : { state: 'ok', summary: 'tout réglé' }) })
-    }
-    out.push(ciState(pr), checksState, sdkState, testsSection(state))
-  }
-  out.push({ key: 'ticket', label: pr ? 'Ticket et commits' : 'Ticket', group: 'work', state: 'none', summary: d.dirtyFiles.length ? plural(d.dirtyFiles.length, 'fichier modifié', 'fichiers modifiés') : '' })
-  if (pr && !w.merged && w.kind !== 'mine') out.push({ key: 'files', label: 'Fichiers', group: 'work', state: 'none', summary: String(pr.changedFiles) })
-  if (!pr) out.push({ key: 'tests', label: 'Tests', group: 'work', state: 'none', summary: '' })
-  out.push({ key: 'logs', label: 'Logs', group: 'work', state: 'none', summary: '' })
-  return out
-}
 
 /** Ce qui débloque le worktree, dans l'ordre : conflits, commentaires, CI, SDK, contrôles, retard sur la base, auto-review, labels, relance, tests, merge. */
 function nextStep({ d, threads, checks, sdk, rules, me }: PrState): NextStep {

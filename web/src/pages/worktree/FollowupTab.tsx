@@ -11,6 +11,7 @@ import { useAction } from '../../data/runs.ts'
 import { go } from '../../router.ts'
 import { Badge, ErrorBox, PromptMenu, RunPanel, Spinner, SuccessBox, plural, useToast, type Tone } from '../../ui.tsx'
 import type { TabProps } from '../Worktree.tsx'
+import { myOpenThreads } from './checklist.tsx'
 
 const STATUS: Record<FollowupStatus, [string, Tone]> = {
   corrigé: ['Corrigé', 'green'],
@@ -23,7 +24,6 @@ const STATUS: Record<FollowupStatus, [string, Tone]> = {
 export const isWaitingAuthor = (t: ReviewThread) => t.awaitingReviewer && t.comments.length > 1
 
 /** Mes fils encore ouverts sur la PR d'un autre : ce que j'ai demandé, ce qu'il a répondu, ce qui reste à faire. */
-export const myOpenThreads = (threads: ReviewThread[] | undefined) => (threads ?? []).filter((t) => t.byMe && !t.isDraft && !t.isResolved)
 
 /**
  * Suivi de mes retours sur la PR d'un autre : chaque commentaire que je lui ai laissé, avec sa réponse.

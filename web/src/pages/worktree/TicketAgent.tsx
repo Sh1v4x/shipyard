@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronRightIcon, CircleHelpIcon, FlaskConicalIcon, PlayIcon, PlusIcon, Trash2Icon, Undo2Icon } from 'lucide-react'
+import { CheckIcon, WrenchIcon, ChevronRightIcon, CircleHelpIcon, FlaskConicalIcon, PlayIcon, PlusIcon, Trash2Icon, Undo2Icon } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,9 @@ const MODES = {
   // Demande directe, hors ticket et hors commentaire : le prompt part des commits et du diff de la branche.
   change: { plan: 'change-plan', work: 'change', title: 'Modification libre' },
 } as const
+
+/** Consigne de « Développer directement » quand aucune n'est écrite : le ticket fait office de plan. */
+const DEVELOP_TICKET = 'Implement the ticket as described: it is the plan. If something is ambiguous, pick the reading closest to the ticket and say so in your output.'
 
 /**
  * Faire travailler l'IA sur le ticket, ou sur une modification libre, en trois temps :
@@ -91,6 +94,8 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
   const canRestart = !!plan.id && !decided && !plan.busy && !workRunning && !restart
   // Travail lancé sans plan (« Tout traiter » depuis l'analyse du projet) : sa consigne fait office de plan pour les corrections.
   const workExtra = extra || work.run?.input?.extra || ''
+  // Travail lancé sans plan et pas encore tranché : son compte rendu remplace le formulaire du plan.
+  const directWork = !plan.id && workIsCurrent && !decided
 
   return (
     <article className="flex min-w-0 flex-[1.4_1_420px] flex-col gap-4 rounded-xl border bg-card p-5">
@@ -113,7 +118,7 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
       <Steps phase={workIsCurrent ? (decided ? 4 : work.result ? 3 : 2) : plan.result ? 1 : 0} />
 
       {/* ---------- 0. Consigne et demande de plan ---------- */}
-      {(!plan.id || decided || restart || planDropped) && !plan.busy && !workRunning && (
+      {(!plan.id || decided || restart || planDropped) && !plan.busy && !workRunning && !(directWork && !restart) && (
         <div className="flex flex-col gap-3">
           {abandoned && (
             <Alert>
@@ -138,8 +143,14 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
             <Button size="sm" disabled={(!ticket && !extra.trim()) || plan.busy} onClick={() => startPlan()}>
               <PlayIcon />{decided || restart || planDropped ? 'Nouveau plan' : 'Proposer un plan'}
             </Button>
+            {/* Ticket (Linear ou local) sans plan encore : l'IA peut développer tout de suite, le ticket tient lieu de plan. */}
+            {ticket && !plan.id && (
+              <Button size="sm" variant="outline" disabled={work.busy} onClick={() => void work.start({ extra: extra.trim() || DEVELOP_TICKET })} title="Sans plan à valider : l’IA lit le ticket et développe. Rien n’est commité avant ton accord.">
+                {work.busy ? <Spinner /> : <WrenchIcon />}Développer directement
+              </Button>
+            )}
             {restart && <Button size="sm" variant="ghost" onClick={() => setRestart(false)}>Revenir au plan actuel</Button>}
-            <span className="text-sm text-muted-foreground">{restart ? 'Le plan actuel sera remplacé par un plan neuf, à partir de cette consigne.' : 'Rien n’est modifié tant que tu n’as pas approuvé le plan.'}</span>
+            <span className="text-sm text-muted-foreground">{restart ? 'Le plan actuel sera remplacé par un plan neuf, à partir de cette consigne.' : ticket && !plan.id ? 'Avec un plan, rien n’est modifié tant que tu ne l’as pas approuvé. Directement, rien n’est commité avant ton accord.' : 'Rien n’est modifié tant que tu n’as pas approuvé le plan.'}</span>
           </div>
         </div>
       )}

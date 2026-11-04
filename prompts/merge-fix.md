@@ -5,7 +5,7 @@ when: Worktree › Conflits › Valider et pousser refusé par un hook › Corri
 vars: [worktree.path, worktree.branch, base, error, rules, lang.app]
 model: sonnet
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git status *), Bash(git diff *), Bash(git log *), Bash(git show *), Bash(bunx biome *), Bash(bunx --bun biome *), Bash(npx biome *), Bash(bun run *), Bash(bun x *), Bash(bunx *), Bash(npm run *), Bash(npx *), Bash(pnpm *), Bash(yarn *)]
+allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git status *), Bash(git diff *), Bash(git log *), Bash(git show *), Bash(bunx biome *), Bash(bunx --bun biome *), Bash(npx biome *), Bash(bun run *), Bash(bun x *), Bash(bunx *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(npx *), Bash(pnpm *), Bash(yarn *)]
 disallowedTools: [Bash(git commit *), Bash(git push *), Bash(git merge *), Bash(git reset *), Bash(git checkout *), Bash(git restore *), Bash(git stash *), Bash(git clean *), Bash(git rm *)]
 ---
 

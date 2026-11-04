@@ -5,7 +5,7 @@ when: Correction commitée refusée par un hook git › Approuver la solution
 vars: [commit.title, repos, files, error, instruction, lang.app]
 model: sonnet
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git status *), Bash(git diff *), Bash(git -C * diff*), Bash(git -C * status*), Bash(bunx biome *), Bash(bunx --bun biome *), Bash(npx biome *), Bash(bun run *), Bash(npm run *), Bash(pnpm *), Bash(yarn *), Bash(npx tsc *), Bash(bunx tsc *)]
+allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git status *), Bash(git diff *), Bash(git -C * diff*), Bash(git -C * status*), Bash(bunx biome *), Bash(bunx --bun biome *), Bash(npx biome *), Bash(bun run *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(yarn *), Bash(npx tsc *), Bash(bunx tsc *)]
 disallowedTools: [Bash(git commit *), Bash(git push *), Bash(git add *), Bash(git reset *), Bash(git checkout *), Bash(git restore *), Bash(git stash *), Bash(git clean *)]
 ---
 

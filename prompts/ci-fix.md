@@ -4,7 +4,7 @@ group: Qualité
 when: Worktree › CI › Appliquer le correctif
 vars: [job.name, ci.cause, ci.fix, lang.app]
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git diff *), Bash(git status *), Bash(npm run *), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *)]
+allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git diff *), Bash(git status *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *)]
 ---
 
 The CI job "{job.name}" is failing.
@@ -17,6 +17,8 @@ Rules:
 - Minimal fix, only what makes the job pass.
 - Never disable a test, a lint rule or a CI step to make it pass.
 - Reproduce the check locally if possible (lint, typecheck, targeted test, .env check script).
+- A lock file out of sync with its manifest (package-lock.json, pnpm-lock.yaml, bun.lock, yarn.lock) is regenerated with the repository's own package manager (`npm install`, `pnpm install`…), never edited by hand, then checked with the CI's command (`npm ci`, `pnpm install --frozen-lockfile`…).
+- If a command you need is refused, say exactly which one in summary: changed stays false.
 
 StructuredOutput:
 - changed: true if files were modified.

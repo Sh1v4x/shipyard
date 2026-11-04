@@ -5,7 +5,7 @@ when: Commit refusé par un hook (Biome, typecheck, format du message…) — au
 vars: [commit.title, commit.files, error, lang.app]
 model: sonnet
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git status *), Bash(git diff *), Bash(bunx biome *), Bash(bunx --bun biome *), Bash(npx biome *), Bash(bun run *), Bash(npm run *), Bash(pnpm *), Bash(yarn *), Bash(npx tsc *), Bash(bunx tsc *)]
+allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git status *), Bash(git diff *), Bash(bunx biome *), Bash(bunx --bun biome *), Bash(npx biome *), Bash(bun run *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(yarn *), Bash(npx tsc *), Bash(bunx tsc *)]
 disallowedTools: [Bash(git commit *), Bash(git push *), Bash(git reset *), Bash(git checkout *), Bash(git stash *)]
 ---
 

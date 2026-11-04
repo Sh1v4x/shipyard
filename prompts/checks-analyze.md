@@ -4,7 +4,7 @@ group: Qualité
 when: Worktree › Contrôles › Analyser
 vars: [pr.number, pr.title, pr.base, worktree.path, report.title, report.body, report.command, report.output, lang.app]
 model: sonnet
-allowedTools: [Read, Grep, Glob, Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git merge-base *), Bash(bun *), Bash(bunx *), Bash(pnpm *), Bash(npm run *), Bash(yarn *), Bash(ls *)]
+allowedTools: [Read, Grep, Glob, Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git merge-base *), Bash(bun *), Bash(bunx *), Bash(pnpm *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(yarn *), Bash(ls *)]
 disallowedTools: [Edit, Write, NotebookEdit, Bash(git commit *), Bash(git push *), Bash(git reset *), Bash(git checkout *), Bash(git restore *), Bash(git clean *), Bash(git stash *)]
 ---
 

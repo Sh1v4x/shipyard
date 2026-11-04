@@ -4,7 +4,7 @@ group: Worktree
 when: Worktree › Ticket › Résultat du travail › Re-tester
 vars: [worktree.path, worktree.branch, plan, report, shots.dir, before.dir, note, capture, lang.app]
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, TodoWrite, Bash(git status *), Bash(git diff *), Bash(git log *), Bash(npm run *), Bash(npm test *), Bash(pnpm *), Bash(bun *), Bash(bunx *), Bash(npx *), Bash(yarn *), Bash(node *), Bash(curl *), Bash(lsof *), Bash(sleep *), Bash(env *), Bash(docker *), Bash(open -a Docker*), Bash(psql *), Bash(pg_isready *), Bash(kill *), mcp__playwright__*, Bash(adb *), Bash(emulator *)]
+allowedTools: [Read, Grep, Glob, TodoWrite, Bash(git status *), Bash(git diff *), Bash(git log *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(npm test *), Bash(pnpm *), Bash(bun *), Bash(bunx *), Bash(npx *), Bash(yarn *), Bash(node *), Bash(curl *), Bash(lsof *), Bash(sleep *), Bash(env *), Bash(docker *), Bash(open -a Docker*), Bash(psql *), Bash(pg_isready *), Bash(kill *), mcp__playwright__*, Bash(adb *), Bash(emulator *)]
 disallowedTools: [Edit, Write, NotebookEdit, Bash(git commit *), Bash(git push *), Bash(git add *), Bash(git reset *), Bash(git stash *), Bash(git checkout *), Bash(git restore *), Bash(git clean *)]
 ---
 

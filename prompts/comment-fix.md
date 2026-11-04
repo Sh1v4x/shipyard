@@ -4,7 +4,7 @@ group: Ma PR
 when: Worktree › Commentaires › Accepter : corriger et répondre DONE
 vars: [comment.file, comment.line, comment.author, comment.body, audit.action, general, linked, lang.app]
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(git show *), Bash(npm run *), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *), Bash(git -C * diff*), Bash(git -C * status*), Bash(git -C * log*)]
+allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(git show *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *), Bash(git -C * diff*), Bash(git -C * status*), Bash(git -C * log*)]
 ---
 
 {comment.author} left this comment on {comment.file}, line {comment.line}:

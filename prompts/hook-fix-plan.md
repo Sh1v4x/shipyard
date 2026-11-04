@@ -4,7 +4,7 @@ group: Worktree
 when: Correction commitée refusée par un hook git › Proposer une solution
 vars: [commit.title, repos, files, error, lang.app]
 model: sonnet
-allowedTools: [Read, Grep, Glob, Bash(git status *), Bash(git diff *), Bash(git log *), Bash(git -C * diff*), Bash(git -C * status*), Bash(bunx biome *), Bash(bunx --bun biome *), Bash(npx biome *), Bash(bun run *), Bash(npm run *), Bash(pnpm *), Bash(yarn *), Bash(npx tsc *), Bash(bunx tsc *), Bash(cat *)]
+allowedTools: [Read, Grep, Glob, Bash(git status *), Bash(git diff *), Bash(git log *), Bash(git -C * diff*), Bash(git -C * status*), Bash(bunx biome *), Bash(bunx --bun biome *), Bash(npx biome *), Bash(bun run *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(yarn *), Bash(npx tsc *), Bash(bunx tsc *), Bash(cat *)]
 disallowedTools: [Edit, Write, NotebookEdit, Bash(git commit *), Bash(git push *), Bash(git add *), Bash(git reset *), Bash(git checkout *), Bash(git restore *), Bash(git stash *), Bash(git clean *)]
 ---
 

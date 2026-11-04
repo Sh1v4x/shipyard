@@ -4,7 +4,7 @@ group: Ma PR
 when: Worktree › Conflits › Résoudre avec l’IA (puis Répondre et continuer) · Worktree › Récupérer develop (mode automatique)
 vars: [worktree.path, worktree.branch, base, pr.number, pr.title, conflicted, ours, theirs, answers, rules, lang.app]
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, TodoWrite, Agent, Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git status *), Bash(git merge-base *), Bash(git ls-files *), Bash(pnpm *), Bash(npm run *), Bash(npx *), Bash(bun *), Bash(bunx *), Bash(yarn *)]
+allowedTools: [Read, Grep, Glob, Edit, Write, TodoWrite, Agent, Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git status *), Bash(git merge-base *), Bash(git ls-files *), Bash(pnpm *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(npx *), Bash(bun *), Bash(bunx *), Bash(yarn *)]
 disallowedTools: [Bash(git add *), Bash(git commit *), Bash(git push *), Bash(git merge *), Bash(git rebase *), Bash(git reset *), Bash(git checkout *), Bash(git restore *), Bash(git stash *), Bash(git clean *), Bash(git rm *)]
 ---
 

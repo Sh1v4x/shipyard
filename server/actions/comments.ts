@@ -1,10 +1,11 @@
 import type { CommentsFixAllAgentOutput, CommentsFixAllOutput, RunScope, ReviewThread, FixOutput, WorktreeDetail } from '../../shared/types.ts'
 import { HttpError } from '../lib/config.ts'
 import { getRun, startJob, startRun, type RunSpec } from '../lib/claude.ts'
+import * as git from '../lib/git.ts'
 import * as gh from '../lib/github.ts'
 import * as schemas from '../schemas.ts'
 import { HookRefused, blockOnRefusal, commitRepos, existingCommitUrl, linkedToCommit, repoOf, toBlocked } from './commitFlow.ts'
-import { DIFFS_DIR, type WorktreeActions, linkedContext, linkedFixText, linkedForFix, prContext, specFrom, threadText } from './context.ts'
+import { DIFFS_DIR, type WorktreeActions, assertNoMerge, linkedContext, linkedFixText, linkedForFix, prContext, specFrom, threadText } from './context.ts'
 
 /**
  * Corrige un commentaire de review, puis commite, pousse, répond « DONE <commit> » et résout le fil.
@@ -76,6 +77,34 @@ export const commentsActions: WorktreeActions = {
       .join('\n\n')
     const linked = await linkedContext(d, 'comments')
     return startRun(specFrom('comments-analyze', { ...vars, context, general: await generalText(project.repo, pr.number), linked: linked.text }, { kind, title: `Analyse des commentaires #${pr.number}`, scope, cwd, schema: schemas.commentsSchema, addDirs: linked.dirs }))
+  },
+  'general-fix': async ({ kind, input, project, d, scope, cwd, needPr }) => {
+    // Un commentaire général (« conditions avec des accolades ») appliqué à tout le code de la PR, pas à une seule ligne.
+    const pr = needPr()
+    assertNoMerge(d, 'appliquer un commentaire général')
+    const comment = (await gh.generalComments(project.repo, pr.number, true)).find((g) => g.url === input.commentUrl)
+    if (!comment) throw new HttpError(404, 'Commentaire général introuvable')
+    const fix = await linkedForFix(d)
+    const files = await git.changedFiles(cwd, pr.base)
+    return startRun(specFrom('general-fix', {
+      'comment.author': comment.author, 'comment.body': comment.body,
+      files: files.map((f) => `- ${f}`).join('\n') || '(none)', 'pr.base': pr.base,
+      linked: linkedFixText(fix.linked),
+    }, {
+      kind, title: `Appliquer à toute la PR le commentaire de ${comment.author}`, scope: { ...scope, ref: comment.url }, cwd, schema: schemas.fixSchema,
+      addDirs: fix.linked.map((l) => l.worktree.path),
+      onSuccess: async (run) => {
+        const out = run.structured as FixOutput
+        const repos = [...(out.changed ? [repoOf(d)] : []), ...(await linkedToCommit(fix, (e) => run.events.push(e)))]
+        if (!repos.length) throw new Error(`L’agent n’a rien modifié, pas de réponse postée : ${out.summary}`)
+        const urls = await commitRepos(repos, out.commitTitle).catch((e) => blockOnRefusal(run, e, out.commitTitle))
+        // Réponse dans la conversation : le commentaire cité, puis le commit, comme le « DONE » d'un fil.
+        const quote = comment.body.split('\n').map((l) => `> ${l}`).join('\n')
+        await gh.commentOnPr(project.repo, pr.number, `${quote}\n\nDONE ${urls.join(' ')}`)
+        gh.clearPrCache(project.repo)
+        run.events.push({ t: 'info', text: `Commit poussé et réponse « DONE ${urls.join(' ')} » postée sur la PR.` })
+      },
+    }))
   },
   'comment-fix': async ({ input, project, d, scope, cwd, needPr }) => {
     const pr = needPr()

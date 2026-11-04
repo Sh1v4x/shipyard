@@ -12,7 +12,7 @@ import type { TabProps } from '../Worktree.tsx'
 const KIND: Partial<Record<ActionKind, string>> = {
   'ticket-plan': 'Plan', ticket: 'Travail', 'change-plan': 'Plan (modif. libre)', change: 'Modification libre',
   'pr-prepare': 'Préparation de PR', 'self-review': 'Auto-review', 'self-review-part': 'Auto-review (lot)', 'finding-fix': 'Correctif (auto-review)',
-  'comments-analyze': 'Analyse des commentaires', 'comment-fix': 'Correctif (commentaire)', 'comments-fix-all': 'Tout accepter', 'comment-reply': 'Réponse rédigée',
+  'comments-analyze': 'Analyse des commentaires', 'comment-fix': 'Correctif (commentaire)', 'general-fix': 'Commentaire général appliqué', 'comments-fix-all': 'Tout accepter', 'comment-reply': 'Réponse rédigée',
   review: 'Review', 'review-part': 'Review (lot)', test: 'Test', 'test-part': 'Test (un dépôt)', 'ci-analyze': 'Diagnostic CI', 'ci-fix': 'Correctif CI',
   'commit-plan': 'Plan de commits', 'commit-exec': 'Commits', 'commit-fix': 'Correction de hook',
   'conflict-resolve': 'Résolution de conflits', 'merge-finish': 'Valider et pousser', 'base-sync': 'Récupérer la base', 'branch-sync': 'Récupérer ma branche',

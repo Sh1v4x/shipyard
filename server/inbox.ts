@@ -33,7 +33,7 @@ export function dismissInbox(runId: string) {
 /** Sous-runs d'une tâche découpée : seule la tâche parente apparaît. */
 const PARTS = new Set(['review-part', 'self-review-part', 'test-part'])
 /** Runs qui n'attendent rien de moi une fois finis (le correctif est déjà poussé, ou c'est une aide ponctuelle). */
-const SILENT = new Set(['ci-fix-all', 'hook-fix-plan', 'findings-fix-all', 'finding-fix', 'ci-fix', 'commit-fix', 'branch-name', 'daily', 'commit-exec', 'comment-fix', 'comments-fix-all', 'comment-reply', 'merge-finish', 'pr-video'])
+const SILENT = new Set(['ci-fix-all', 'hook-fix-plan', 'findings-fix-all', 'finding-fix', 'ci-fix', 'commit-fix', 'branch-name', 'daily', 'commit-exec', 'comment-fix', 'general-fix', 'comments-fix-all', 'comment-reply', 'merge-finish', 'pr-video'])
 
 type Draft = Pick<InboxItem, 'title' | 'detail' | 'tone'> & { until?: string; clearsOnOpen?: boolean } | null
 

@@ -348,6 +348,11 @@ function nextDevTypes(cwd: string): string[] {
   return out
 }
 
+/** Fichiers modifiés par la branche depuis origin/<base> (ceux de la PR). */
+export async function changedFiles(cwd: string, base: string): Promise<string[]> {
+  return (await git(cwd, ['diff', '--name-only', '--diff-filter=d', `origin/${base}...HEAD`])).split('\n').filter(Boolean)
+}
+
 /** Auteurs des commits de origin/<branch> absents en local. */
 export async function remoteAuthors(cwd: string, branch: string): Promise<string[]> {
   const out = await git(cwd, ['log', '--format=%an', `HEAD..origin/${branch}`]).catch(() => '')

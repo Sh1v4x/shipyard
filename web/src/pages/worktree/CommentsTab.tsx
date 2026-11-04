@@ -59,7 +59,7 @@ export function CommentsTab({ project, wtId }: TabProps) {
           <PromptMenu items={[['comments-analyze', 'Analyse des commentaires'], ['comment-fix', 'Correction d’un commentaire']]} />
         </span>
       </div>
-      {general.data && general.data.length > 0 && <GeneralComments comments={general.data} />}
+      {general.data && general.data.length > 0 && <GeneralComments comments={general.data} project={project.id} wtId={wtId} />}
       <RunPanel id={analysis.id} events={analysis.events} running={analysis.running} run={analysis.run} label="Claude vérifie chaque commentaire dans le code" onStop={analysis.stop} action={analysis} />
       {crossRepo.length > 0 && (
         <div className="flex flex-col gap-2 rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
@@ -128,7 +128,7 @@ const VERDICT: Record<string, { label: string; tone: 'green' | 'red' | 'gray' }>
  * Commentaires généraux de la PR : le texte d'une review ou de la conversation, attaché à aucune ligne.
  * C'est souvent là que le reviewer explique ses commentaires de ligne courts (« ici »). L'analyse et les corrections les lisent aussi.
  */
-function GeneralComments({ comments }: { comments: GeneralComment[] }) {
+function GeneralComments({ comments, project, wtId }: { comments: GeneralComment[]; project: string; wtId: string }) {
   return (
     <details open className="group overflow-hidden rounded-xl border bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
@@ -145,9 +145,36 @@ function GeneralComments({ comments }: { comments: GeneralComment[] }) {
             <a href={g.url} target="_blank" rel="noreferrer" className="ml-auto text-xs text-muted-foreground hover:underline">Voir sur GitHub ↗</a>
           </div>
           <Markdown text={g.body} />
+          <GeneralFix comment={g} project={project} wtId={wtId} />
         </div>
       ))}
     </details>
+  )
+}
+
+/**
+ * « Appliquer à toute la PR » : un agent applique la remarque partout où elle vaut dans le code de la PR (pas seulement
+ * la ligne pointée), puis Shipyard commite, pousse et répond « DONE <commit> » sous le commentaire, dans la conversation.
+ */
+function GeneralFix({ comment, project, wtId }: { comment: GeneralComment; project: string; wtId: string }) {
+  const fix = useAction<FixOutput>('general-fix', { project, worktree: wtId, ref: comment.url }, { commentUrl: comment.url })
+  const start = () => {
+    if (!confirm(`Appliquer « ${comment.body.slice(0, 80)} » à tout le code de la PR ? L’IA modifie les fichiers, puis Shipyard commite, pousse et répond sur la PR.`)) return
+    void fix.start()
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {!fix.busy && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" onClick={start} title="L’IA applique la remarque partout où elle vaut dans le code de la PR, puis commit, push et réponse DONE">
+            <WrenchIcon />{fix.result ? 'Réappliquer à toute la PR' : 'Appliquer à toute la PR'}
+          </Button>
+          <PromptMenu items={[['general-fix', 'Appliquer un commentaire général']]} />
+        </div>
+      )}
+      <RunPanel id={fix.id} events={fix.events} running={fix.running} run={fix.run} label="L’IA applique la remarque à toute la PR" defaultOpen={fix.running} onStop={fix.stop} action={fix} />
+      {fix.result && !fix.busy && <p className="text-sm text-muted-foreground">{fix.result.summary}</p>}
+    </div>
   )
 }
 

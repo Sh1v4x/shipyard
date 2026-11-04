@@ -87,6 +87,7 @@ export const actionInput = z.object({
   finding: optional(finding),
   findings: optional(z.array(finding)),
   threadId: optional(z.string()),
+  commentUrl: optional(z.string()),
   action: optional(z.string()),
   job: optional(z.object({ id: z.string(), name: z.string(), workflow: z.string().nullable(), jobId: z.string().nullable() })),
   commits: optional(z.array(z.object({ title: z.string(), files: z.array(z.string()), project: z.string().optional() }))),

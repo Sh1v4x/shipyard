@@ -603,6 +603,8 @@ export interface ActionInput {
   /** Auto-review : les remarques acceptées, corrigées ensemble par un seul agent. */
   findings?: Finding[]
   threadId?: string
+  /** Commentaire général de la PR (son url) : appliqué à toute la PR par general-fix. */
+  commentUrl?: string
   action?: string
   job?: { id: string; name: string; workflow: string | null; jobId: string | null }
   commits?: { title: string; files: string[]; project?: string }[]
@@ -658,6 +660,7 @@ export type ActionKind =
   | 'finding-fix'
   | 'comments-analyze'
   | 'comment-fix'
+  | 'general-fix'
   | 'comments-fix-all'
   | 'comment-reply'
   | 'review'

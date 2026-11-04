@@ -639,6 +639,11 @@ export async function createPr(cwd: string, opts: { title: string; body: string;
   return (await gh(args, { cwd, input: opts.body, timeoutMs: 120_000 })).trim()
 }
 
+/** Commentaire dans la conversation de la PR. */
+export async function commentOnPr(repo: string, num: number, body: string) {
+  await gh(['pr', 'comment', String(num), '--repo', repo, '--body-file', '-'], { input: body })
+}
+
 export async function requestReviewers(repo: string, num: number, reviewers: string[]) {
   await gh(['api', `repos/${repo}/pulls/${num}/requested_reviewers`, '-X', 'POST', '--input', '-'], { input: JSON.stringify({ reviewers }) })
 }

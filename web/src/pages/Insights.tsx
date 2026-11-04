@@ -2,6 +2,7 @@ import { CopyIcon, DownloadIcon, FileTextIcon, GitBranchPlusIcon, LightbulbIcon,
 import { useState } from 'react'
 import type { InsightItem, InsightsMode, InsightsOutput, Project } from '../../../shared/types.ts'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label as FieldLabel } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -104,6 +105,9 @@ function DigestCard({ project }: { project: Project }) {
 function Results({ project, result }: { project: Project; result: InsightsOutput }) {
   const toast = useToast()
   const [filter, setFilter] = useState<string | null>(null)
+  // Remarques cochées : traitées ensemble dans un seul worktree (un ticket local qui les regroupe).
+  const [picked, setPicked] = useState<number[]>([])
+  const toggle = (n: number) => setPicked((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n]))
   const categories = [...new Set(result.items.map((i) => i.category))]
   const items = result.items.filter((i) => !filter || i.category === filter)
 
@@ -128,32 +132,81 @@ function Results({ project, result }: { project: Project; result: InsightsOutput
         </div>
       )}
       {!items.length && <Empty title="Aucune proposition" />}
-      {items.map((i, n) => (
-        <article key={n} className="flex flex-col gap-3 rounded-xl border bg-card p-5">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <h3 className="min-w-0 flex-1 font-semibold">{i.title}</h3>
-            <span className="flex flex-wrap gap-1">
-              <Badge tone={CATEGORY[i.category] ?? 'gray'}>{i.category}</Badge>
-              <Badge tone={IMPACT[i.impact]}>impact {i.impact}</Badge>
-              <Badge tone="gray">effort {i.effort}</Badge>
-            </span>
-          </div>
-          <p className="text-sm leading-relaxed text-muted-foreground">{i.why}</p>
-          <p className="text-sm leading-relaxed whitespace-pre-line">{i.proposal}</p>
-          {i.files.length > 0 && <p className="font-mono text-xs break-all text-muted-foreground">{i.files.join(', ')}</p>}
-          {i.risk && <p className={cn('text-sm text-amber-700 dark:text-amber-400')}>Risque : {i.risk}</p>}
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" disabled={!project.team} title={project.team ? undefined : 'Aucune équipe Linear liée à ce projet'} onClick={() => toTicket(i)}><TicketPlusIcon />Rédiger le ticket Linear</Button>
-            <Button size="sm" variant="outline" onClick={() => void copy(i)}><CopyIcon />Copier</Button>
-          </div>
-          <LocalStart project={project} item={i} />
-        </article>
-      ))}
+      {picked.length > 0 && <PickedBar project={project} items={picked.map((n) => result.items[n])} onClear={() => setPicked([])} />}
+      {items.map((i) => {
+        const n = result.items.indexOf(i)
+        return (
+          <article key={n} className={cn('flex flex-col gap-3 rounded-xl border bg-card p-5', picked.includes(n) && 'border-primary')}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <Checkbox className="mt-0.5" checked={picked.includes(n)} onCheckedChange={() => toggle(n)} aria-label={`Sélectionner « ${i.title} »`} />
+              <h3 className="min-w-0 flex-1 font-semibold">{i.title}</h3>
+              <span className="flex flex-wrap gap-1">
+                <Badge tone={CATEGORY[i.category] ?? 'gray'}>{i.category}</Badge>
+                <Badge tone={IMPACT[i.impact]}>impact {i.impact}</Badge>
+                <Badge tone="gray">effort {i.effort}</Badge>
+              </span>
+            </div>
+            <p className="text-sm leading-relaxed text-muted-foreground">{i.why}</p>
+            <p className="text-sm leading-relaxed whitespace-pre-line">{i.proposal}</p>
+            {i.files.length > 0 && <p className="font-mono text-xs break-all text-muted-foreground">{i.files.join(', ')}</p>}
+            {i.risk && <p className={cn('text-sm text-amber-700 dark:text-amber-400')}>Risque : {i.risk}</p>}
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" disabled={!project.team} title={project.team ? undefined : 'Aucune équipe Linear liée à ce projet'} onClick={() => toTicket(i)}><TicketPlusIcon />Rédiger le ticket Linear</Button>
+              <Button size="sm" variant="outline" onClick={() => void copy(i)}><CopyIcon />Copier</Button>
+            </div>
+            <LocalStart project={project} item={i} />
+          </article>
+        )
+      })}
     </section>
   )
 }
 
-const PREFIX: Record<string, string> = { feature: 'feat', performance: 'perf', sécurité: 'fix', tests: 'test', dette: 'refactor', architecture: 'refactor', accessibilité: 'fix', ux: 'feat', dx: 'chore' }
+const RANK_EFFORT = ['S', 'M', 'L'] as const
+const RANK_IMPACT = ['faible', 'moyen', 'fort'] as const
+
+/** Plusieurs remarques réunies en une seule tâche : le ticket local du worktree qui les traite ensemble. */
+function mergeItems(items: InsightItem[]): InsightItem {
+  if (items.length === 1) return items[0]
+  return {
+    title: `${items.length} corrections : ${items.map((i) => i.title).join(' · ')}`.slice(0, 200),
+    category: items[0].category,
+    why: `Remarques retenues de l’analyse, à traiter ensemble (${items.length}).`,
+    proposal: items.map((i, n) => [`${n + 1}. ${i.title}`, i.why, i.proposal, i.files.length ? `Fichiers : ${i.files.join(', ')}` : ''].filter(Boolean).join('\n')).join('\n\n'),
+    files: [...new Set(items.flatMap((i) => i.files))],
+    effort: RANK_EFFORT[Math.max(...items.map((i) => RANK_EFFORT.indexOf(i.effort)))],
+    impact: RANK_IMPACT[Math.max(...items.map((i) => RANK_IMPACT.indexOf(i.impact)))],
+    risk: items.map((i) => i.risk).filter(Boolean).join(' '),
+  }
+}
+
+/**
+ * Barre de la sélection : un worktree pour traiter les remarques cochées ensemble. Elles y deviennent le ticket local,
+ * puis l'onglet Ticket propose un plan et lance le travail après ton accord.
+ */
+function PickedBar({ project, items, onClear }: { project: Project; items: InsightItem[]; onClear: () => void }) {
+  const merged = mergeItems(items)
+  const [branch, setBranch] = useState('')
+  const create = useCreateLocalTicketWorktree(project.id)
+  const toast = useToast()
+  const name = branch || (items.length === 1 ? branchFor(merged) : `${PREFIX[merged.category] ?? 'fix'}/project-review-${items.length}-fixes`)
+  return (
+    <div className="sticky top-16 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-primary bg-card p-3 shadow-sm">
+      <span className="text-sm font-medium">{plural(items.length, 'remarque sélectionnée', 'remarques sélectionnées')}</span>
+      <Input aria-label="Nom de la branche" value={name} onChange={(e) => setBranch(e.target.value)} className="h-8 min-w-60 flex-1 font-mono text-xs" />
+      <Button size="sm" disabled={create.isPending || !/^[\w./-]+$/.test(name.trim())} onClick={() => create.mutate({ branch: name.trim(), item: merged }, {
+        onSuccess: (r) => {
+          toast('Worktree créé : propose le plan, puis lance le travail')
+          go({ page: 'worktree', project: project.id, wt: r.id, tab: 'ticket' })
+        },
+        onError: (e) => toast(e.message, true),
+      })}>{create.isPending ? <Spinner /> : <GitBranchPlusIcon />}Traiter dans un worktree</Button>
+      <Button size="sm" variant="ghost" onClick={onClear}>Tout décocher</Button>
+    </div>
+  )
+}
+
+const PREFIX: Record<string, string> = { bug: 'fix', convention: 'refactor', feature: 'feat', performance: 'perf', sécurité: 'fix', tests: 'test', dette: 'refactor', architecture: 'refactor', accessibilité: 'fix', ux: 'feat', dx: 'chore' }
 
 /** Nom de branche tiré du titre : préfixe selon la catégorie, puis le titre en kebab-case, sans accents. */
 const branchFor = (i: InsightItem) => {

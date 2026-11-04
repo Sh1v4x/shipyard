@@ -4,7 +4,7 @@ import type { RunRecord } from './runStore.ts'
 
 let records: RunRecord[] = []
 let decisions: Record<string, unknown> = {}
-vi.mock('./claude.ts', () => ({ allRuns: () => records }))
+vi.mock('./claude.ts', () => ({ allRuns: () => records, getRun: (id: string) => records.find((r) => r.id === id) ?? null }))
 vi.mock('./runArtifacts.ts', () => ({ reviewDecisionsPath: (id: string) => id }))
 vi.mock('./store.ts', () => ({ readJsonFile: (path: string) => decisions[path] ?? null }))
 
@@ -42,6 +42,16 @@ describe('testsSummary', () => {
     expect(s.ai).toMatchObject({ failed: 1, toCheck: 1 })
     expect(s.manual).toMatchObject({ done: 3, total: 3 })
     expect(manualTest(WT)?.steps.map((x) => x.check?.decided ?? null)).toEqual([null, false, true])
+  })
+
+  it('ne compte plus un point à vérifier auquel j’ai répondu, dépôts liés compris', () => {
+    const scenarios = [{ name: 'a', status: 'warn', detail: '' }, { name: 'b', status: 'warn', detail: '' }]
+    const suite = { command: '', passed: 0, failed: 0, summary: '' }
+    const web = run('test-part', { structured: { suite, scenarios }, testDecisions: { a: 'Garder' } })
+    const mobile = run('test-part', { structured: { suite, scenarios }, testDecisions: { a: 'Garder', b: 'Corriger' } })
+    const part = (r: RunRecord) => ({ project: 'app', projectName: 'app', worktree: WT, platform: 'web', runId: r.id, output: r.structured, error: null })
+    records = [web, mobile, run('test', { structured: { parts: [part(web), part(mobile)] } })]
+    expect(testsSummary(WT).ai).toMatchObject({ failed: 0, toCheck: 1 })
   })
 
   it('ignore les runs en échec et signale un test en cours', () => {

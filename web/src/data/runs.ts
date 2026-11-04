@@ -149,6 +149,8 @@ export async function migrateBrowserTestState() {
       if (!value) continue
       if (key.startsWith('manual-steps:')) entries.push({ key, path: `/runs/${key.slice('manual-steps:'.length)}/manual-steps`, body: { checked: JSON.parse(value) } })
       if (key.startsWith('devpanel:test-check:')) entries.push({ key, path: `/runs/${key.slice('devpanel:test-check:'.length)}/check-decision`, body: { decision: value } })
+      const answer = key.match(/^devpanel:test-decision:([\w-]+):(.+)$/)
+      if (answer) entries.push({ key, path: `/runs/${answer[1]}/test-decision`, body: { name: answer[2], decision: value } })
     }
   } catch {
     return

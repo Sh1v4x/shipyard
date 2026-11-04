@@ -1,5 +1,5 @@
 import type { ActionKind, FindingsFixAllOutput, ManualTestOutput, MultiTestOutput, ReviewDecisions, ReviewOutput, SelfReviewSummary, TestCheckOutput, TestOutput, TestsSummary } from '../../shared/types.ts'
-import { allRuns } from './claude.ts'
+import { allRuns, getRun } from './claude.ts'
 import { reviewDecisionsPath } from './runArtifacts.ts'
 import { readJsonFile } from './store.ts'
 import type { RunRecord } from './runStore.ts'
@@ -16,19 +16,24 @@ function latest(worktree: string, kind: ActionKind, opts: { ref?: string; succes
   return best
 }
 
-/** Points du test IA : en échec (scénarios, suite, dépôts liés en erreur) et à vérifier. */
-function testPoints(out: TestOutput | MultiTestOutput | null): { failed: number; toCheck: number } {
-  if (!out) return { failed: 0, toCheck: 0 }
-  const parts = ('parts' in out ? out.parts.map((p) => p.output) : [out]).filter((t): t is TestOutput => !!t)
+/**
+ * Points du test IA : en échec (scénarios, suite, dépôts liés en erreur) et à vérifier.
+ * Un point « à vérifier » auquel j'ai répondu (réponse gardée sur le run du dépôt) n'est plus à vérifier.
+ */
+function testPoints(run: RunRecord | null): { failed: number; toCheck: number } {
+  const out = run?.structured as TestOutput | MultiTestOutput | null | undefined
+  if (!run || !out) return { failed: 0, toCheck: 0 }
+  const parts = ('parts' in out ? out.parts.map((p) => ({ t: p.output, decisions: (p.runId ? getRun(p.runId)?.testDecisions : null) ?? {} })) : [{ t: out, decisions: run.testDecisions ?? {} }])
+    .flatMap(({ t, decisions }) => (t ? [{ t, decisions }] : []))
   const errors = 'parts' in out ? out.parts.filter((p) => p.error).length : 0
   return {
-    failed: parts.reduce((a, t) => a + t.scenarios.filter((s) => s.status === 'fail').length + t.suite.failed, errors),
-    toCheck: parts.reduce((a, t) => a + t.scenarios.filter((s) => s.status === 'warn').length, 0),
+    failed: parts.reduce((a, { t }) => a + t.scenarios.filter((s) => s.status === 'fail').length + t.suite.failed, errors),
+    toCheck: parts.reduce((a, p) => a + p.t.scenarios.filter((s) => s.status === 'warn' && !p.decisions[s.name]).length, 0),
   }
 }
 
-export const testIssues = (out: TestOutput | MultiTestOutput | null) => {
-  const p = testPoints(out)
+export const testIssues = (run: RunRecord | null) => {
+  const p = testPoints(run)
   return p.failed + p.toCheck
 }
 
@@ -61,7 +66,7 @@ export function testsSummary(worktree: string): TestsSummary {
   const manual = manualTest(worktree)
   return {
     running: latest(worktree, 'test')?.status === 'running' || latest(worktree, 'test-manual')?.status === 'running',
-    ai: ai ? { ...testPoints(ai.structured as TestOutput | MultiTestOutput | null), at: ai.startedAt } : null,
+    ai: ai ? { ...testPoints(ai), at: ai.startedAt } : null,
     manual: manual ? { done: manual.steps.filter((s) => s.done).length, total: manual.steps.length, at: manual.run.startedAt } : null,
   }
 }

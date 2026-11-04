@@ -661,6 +661,21 @@ export function useSetCheckDecision(project: string, wt: string) {
   })
 }
 
+/** Ma réponse à un point « à vérifier » du test IA (null pour la retirer) : l'étape « Tests » n'en tient plus compte. */
+export function useSetTestDecision(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ runId, name, decision }: { runId: string; name: string; decision: string | null }) =>
+      api(`/runs/${runId}/test-decision`, { method: 'PUT', body: { name, decision } }),
+    onMutate: ({ runId, name, decision }) =>
+      qc.setQueryData<Record<string, string>>(qk.testDecisions(runId), (d) => {
+        const { [name]: _old, ...rest } = d ?? {}
+        return decision ? { ...rest, [name]: decision } : rest
+      }),
+    onSettled: (_, __, { runId }) => Promise.all([qc.invalidateQueries({ queryKey: qk.testDecisions(runId) }), qc.invalidateQueries({ queryKey: qk.worktree(project, wt) })]),
+  })
+}
+
 /** Relit GitHub et Linear pour la période, sans le cache du serveur. */
 export function useRefreshStats(from: string, to: string, scope: StatsScope) {
   const qc = useQueryClient()

@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label as FieldLabel } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { useSaveTestMemory } from '../../data/mutations.ts'
-import { useTestMemory } from '../../data/queries.ts'
+import { useSaveTestMemory, useSetTestDecision } from '../../data/mutations.ts'
+import { useTestDecisions, useTestMemory } from '../../data/queries.ts'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { MultiTestOutput, TestOutput } from '../../../../shared/types.ts'
@@ -99,7 +99,7 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
               </summary>
               <div className="flex flex-col gap-4 border-t p-4">
                 {p.runId && <TestVideos runId={p.runId} endedAt={test.run?.endedAt ?? null} />}
-                {p.output && <TestReport r={p.output} runId={p.runId ?? test.id} onFix={mine ? (n, d, decided) => askFix(n, d, decided, p.projectName) : undefined} onRetest={p.worktree === wtId ? retest : undefined} />}
+                {p.output && <TestReport r={p.output} runId={p.runId ?? test.id} where={{ project: project.id, wt: wtId }} onFix={mine ? (n, d, decided) => askFix(n, d, decided, p.projectName) : undefined} onRetest={p.worktree === wtId ? retest : undefined} />}
               </div>
             </details>
           ))}
@@ -107,7 +107,7 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
       ) : (
         <>
           {test.id && test.run && <TestVideos runId={test.id} endedAt={test.run.endedAt} />}
-          {r && <TestReport r={r} runId={test.id} onFix={mine ? askFix : undefined} onRetest={retest} />}
+          {r && <TestReport r={r} runId={test.id} where={{ project: project.id, wt: wtId }} onFix={mine ? askFix : undefined} onRetest={retest} />}
         </>
       )}
       <ManualTest project={project} wtId={wtId} consigne={consigne} mine={mine} />
@@ -133,9 +133,10 @@ type Scenario = TestOutput['scenarios'][number]
  * Rapport d'un test : d'abord les points à trancher (le test ne peut pas décider seul), puis la suite et les scénarios.
  * onFix : demander un correctif (sinon, copier pour la review) ; onRetest : rejouer un seul scénario.
  */
-function TestReport({ r, runId, onFix, onRetest }: { r: TestOutput; runId: string | null; onFix?: (name: string, detail: string, decided?: string) => void; onRetest?: (name: string, note?: string) => void }) {
+function TestReport({ r, runId, where, onFix, onRetest }: { r: TestOutput; runId: string | null; where: { project: string; wt: string }; onFix?: (name: string, detail: string, decided?: string) => void; onRetest?: (name: string, note?: string) => void }) {
   const toast = useToast()
   const toDecide = r.scenarios.filter((s) => s.status === 'warn')
+  const decisions = useTestDecisions(runId)
   const others = r.scenarios.filter((s) => s.status !== 'warn')
   return (
     <div className="flex flex-col gap-4">
@@ -146,7 +147,7 @@ function TestReport({ r, runId, onFix, onRetest }: { r: TestOutput; runId: strin
             <span className="font-semibold">{toDecide.length > 1 ? `${toDecide.length} points à trancher` : '1 point à trancher'}</span>
             <span className="text-sm text-muted-foreground">Le test ne peut pas décider seul : choisis une réponse, l’IA applique le correctif si besoin.</span>
           </div>
-          {toDecide.map((s) => <DecisionCard key={s.name} s={s} runId={runId} onFix={onFix} onRetest={onRetest} />)}
+          {toDecide.map((s) => <DecisionCard key={s.name} s={s} runId={runId} where={where} decided={decisions.data?.[s.name] ?? readDecision(decisionKey(runId, s.name))} onFix={onFix} onRetest={onRetest} />)}
         </section>
       )}
       <div className="overflow-hidden rounded-xl border bg-card">
@@ -175,7 +176,7 @@ function TestReport({ r, runId, onFix, onRetest }: { r: TestOutput; runId: strin
   )
 }
 
-/** Décision prise sur un point à trancher, gardée dans ce navigateur pour ce test. */
+/** Réponse gardée dans ce navigateur avant qu'elle ne soit enregistrée sur le run (envoyée au serveur au démarrage). */
 const decisionKey = (runId: string | null, name: string) => `devpanel:test-decision:${runId ?? 'none'}:${name}`
 function readDecision(key: string) {
   try {
@@ -188,16 +189,23 @@ function readDecision(key: string) {
 /**
  * Un point à trancher : la question (formulée par le test, sinon son constat), une réponse par bouton,
  * ou une réponse libre. Une réponse qui demande un changement lance le correctif ; « garder » le marque comme tranché.
+ * La réponse est gardée sur le run du test : un point tranché ne compte plus dans l'étape « Tests ».
  */
-function DecisionCard({ s, runId, onFix, onRetest }: { s: Scenario; runId: string | null; onFix?: (name: string, detail: string, decided?: string) => void; onRetest?: (name: string, note?: string) => void }) {
+function DecisionCard({ s, runId, where, decided, onFix, onRetest }: {
+  s: Scenario
+  runId: string | null
+  where: { project: string; wt: string }
+  decided: string | null
+  onFix?: (name: string, detail: string, decided?: string) => void
+  onRetest?: (name: string, note?: string) => void
+}) {
   const toast = useToast()
-  const key = decisionKey(runId, s.name)
-  const [decided, setDecided] = useState(() => readDecision(key))
+  const setDecision = useSetTestDecision(where.project, where.wt)
   const [free, setFree] = useState<string | null>(null)
   const options = s.decision?.options ?? [{ label: 'C’est bon tel quel', fix: null }]
-  const save = (label: string) => {
-    setDecided(label)
-    try { localStorage.setItem(key, label) } catch { /* stockage indisponible */ }
+  const save = (label: string | null) => {
+    if (runId) setDecision.mutate({ runId, name: s.name, decision: label })
+    try { localStorage.removeItem(decisionKey(runId, s.name)) } catch { /* stockage indisponible */ }
   }
   const choose = (o: { label: string; fix: string | null }) => {
     if (o.fix && !onFix) {
@@ -239,7 +247,7 @@ function DecisionCard({ s, runId, onFix, onRetest }: { s: Scenario; runId: strin
           )}
         </div>
       )}
-      {decided && <Button variant="link" size="sm" className="h-7 self-start px-0" onClick={() => { setDecided(null); try { localStorage.removeItem(key) } catch { /* stockage indisponible */ } }}>Changer de réponse</Button>}
+      {decided && <Button variant="link" size="sm" className="h-7 self-start px-0" onClick={() => save(null)}>Changer de réponse</Button>}
     </div>
   )
 }

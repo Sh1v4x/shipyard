@@ -475,6 +475,8 @@ export interface Run extends RunSummary {
   manualChecked?: number[]
   /** Vérification d'une étape (test-check) : ma décision, qui prend le pas sur le verdict de l'IA. */
   checkDecision?: 'pass' | 'fail' | null
+  /** Test IA (test, test-part) : ma réponse aux points « à vérifier », par nom de scénario. Un point tranché ne bloque plus l'étape « Tests ». */
+  testDecisions?: Record<string, string>
   /** Correction appliquée mais commit refusé par un hook git : les changements attendent ma décision. */
   blockedCommit?: BlockedCommit | null
   events: RunEvent[]

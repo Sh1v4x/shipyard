@@ -169,6 +169,7 @@ export const statsQuery = z
   .refine((q) => q.from <= q.to, { message: 'la date de début doit précéder la date de fin' })
 export const manualStepsInput = z.object({ checked: z.array(z.number().int().nonnegative()) })
 export const checkDecisionInput = z.object({ decision: z.enum(['pass', 'fail']).nullable() })
+export const testDecisionInput = z.object({ name: z.string().min(1), decision: z.string().min(1).nullable() })
 
 export const createNoteInput = z.object({ text: z.string(), project: z.string().nullable().optional() })
 export const updateNoteInput = z.object({

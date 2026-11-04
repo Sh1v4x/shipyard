@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
 import type {
-  ChecksAnalyzeOutput, CiAllOutput, CommentsOutput, ConflictResolveOutput, ManualTestOutput, MultiTestOutput, FollowupOutput, InboxItem, InsightsOutput, PrReviewOutput, ReviewDecisions, ReviewOutput, TestOutput, TicketDraftOutput, TicketPlanOutput,
+  ChecksAnalyzeOutput, CiAllOutput, CommentsOutput, ConflictResolveOutput, ManualTestOutput, FollowupOutput, InboxItem, InsightsOutput, PrReviewOutput, ReviewDecisions, ReviewOutput, TicketDraftOutput, TicketPlanOutput,
 } from '../shared/types.ts'
 import { runHref } from '../shared/inbox.ts'
 import { allRuns } from './lib/claude.ts'
@@ -131,7 +131,7 @@ async function awaiting(run: RunRecord, runs: RunRecord[], repo?: string): Promi
     case 'pr-prepare':
       return { title: 'PR prête à créer', detail: 'Relis le titre et la description, puis pousse', tone: 'blue', until: 'disparaît quand la PR est créée' }
     case 'test': {
-      const ko = testIssues(out as TestOutput | MultiTestOutput | null)
+      const ko = testIssues(run)
       return { title: 'Test terminé', detail: ko ? `${ko} point(s) en échec ou à vérifier` : 'Tout passe', tone: ko ? 'red' : 'green', ...READ }
     }
     case 'test-manual': {

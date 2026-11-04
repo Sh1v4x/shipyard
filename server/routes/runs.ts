@@ -54,6 +54,18 @@ runsRoutes.put('/runs/:id/check-decision', async (c) => {
   return c.json({ ok: true })
 })
 
+runsRoutes.get('/runs/:id/test-decisions', (c) => c.json(getRun(c.req.param('id'))?.testDecisions ?? {}))
+
+/** Test IA : ma réponse à un point « à vérifier » (null pour la retirer). */
+runsRoutes.put('/runs/:id/test-decision', async (c) => {
+  const run = getRun(c.req.param('id'))
+  if (run?.kind !== 'test' && run?.kind !== 'test-part') throw new HttpError(404, 'Test introuvable')
+  const { name, decision } = await jsonBody(c, inputs.testDecisionInput)
+  const { [name]: _old, ...rest } = run.testDecisions ?? {}
+  patchRun(run.id, { testDecisions: decision ? { ...rest, [name]: decision } : rest })
+  return c.json({ ok: true })
+})
+
 runsRoutes.get('/runs', (c) => {
   const q = c.req.query()
   return c.json(listRuns({ project: q.project, worktree: q.worktree, kind: q.kind, ref: q.ref, status: q.status, pr: q.pr ? Number(q.pr) : undefined }, Number(q.limit ?? 30)))

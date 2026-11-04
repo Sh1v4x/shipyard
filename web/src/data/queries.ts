@@ -235,6 +235,10 @@ export const useRunningRuns = () =>
 export const useReviewDecisions = (run: string | null) =>
   useQuery({ queryKey: qk.reviewDecisions(run), queryFn: () => api<ReviewDecisions>(`/runs/${run}/review-decisions`), enabled: !!run, staleTime: 0 })
 
+/** Mes réponses aux points « à vérifier » d'un test IA (run d'un dépôt), par nom de scénario. */
+export const useTestDecisions = (run: string | null) =>
+  useQuery({ queryKey: qk.testDecisions(run), queryFn: () => api<Record<string, string>>(`/runs/${run}/test-decisions`), enabled: !!run })
+
 export const useCreatedTickets = (run: string | null) =>
   useQuery({ queryKey: qk.createdTickets(run), queryFn: () => api<(CreatedTicket & { index: number })[]>(`/runs/${run}/created-tickets`), enabled: !!run })
 

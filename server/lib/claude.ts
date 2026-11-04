@@ -171,7 +171,7 @@ export function setRunInput(id: string, input: ActionInput) {
 }
 
 /** Modifie un run terminé ou en cours (champs de suivi : commit bloqué…). */
-export function patchRun(id: string, patch: Partial<Pick<Run, 'blockedCommit' | 'manualChecked' | 'checkDecision'>>) {
+export function patchRun(id: string, patch: Partial<Pick<Run, 'blockedCommit' | 'manualChecked' | 'checkDecision' | 'testDecisions'>>) {
   const l = live.get(id)
   const r = l?.run ?? getRun(id)
   if (!r) return

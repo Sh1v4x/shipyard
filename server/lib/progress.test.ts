@@ -54,6 +54,17 @@ describe('testsSummary', () => {
     expect(testsSummary(WT).ai).toMatchObject({ failed: 0, toCheck: 1 })
   })
 
+  it('compte le test lancé depuis un worktree lié qui a aussi testé celui-ci', () => {
+    const suite = { command: '', passed: 1, failed: 0, summary: '' }
+    const out = { suite, scenarios: [{ name: 'a', status: 'pass', detail: '' }] }
+    const part = (worktree: string, projectName: string) => ({ project: projectName, projectName, worktree, platform: 'web', runId: null, output: out, error: null })
+    records = [run('test', { scope: { project: 'app', worktree: 'web' }, structured: { parts: [part('web', 'app'), part(WT, 'app-mobile')] } })]
+    expect(testsSummary(WT).ai).toMatchObject({ failed: 0, toCheck: 0, runId: records[0].id, from: 'app' })
+    // Repris sans être retesté (carriedAt) : ce test-là ne couvre pas ce worktree.
+    records = [run('test', { scope: { project: 'app', worktree: 'web' }, structured: { parts: [part('web', 'app'), { ...part(WT, 'app-mobile'), carriedAt: '2026-10-01T00:00:00Z' }] } })]
+    expect(testsSummary(WT).ai).toBeNull()
+  })
+
   it('ignore les runs en échec et signale un test en cours', () => {
     records = [run('test', { status: 'error' }), run('test-manual', { status: 'running' })]
     expect(testsSummary(WT)).toEqual({ running: true, ai: null, manual: null })
@@ -72,12 +83,20 @@ describe('selfReviewSummary', () => {
       self,
       run('findings-fix-all', { scope: { project: 'app', worktree: WT, ref: self.id }, structured: { url: null, results: [{ id: 'f2', ok: true, detail: '' }, { id: 'f3', ok: false, detail: '' }] } }),
     ]
-    expect(selfReviewSummary(WT)).toEqual({ running: false, at: self.startedAt, findings: 4, pending: 2 })
+    expect(selfReviewSummary(WT)).toEqual({ running: false, at: self.startedAt, findings: 4, pending: 2, fixed: ['f2'] })
+  })
+
+  it('garde les remarques corrigées par une correction précédente', () => {
+    const self = run('self-review', { structured: { summary: '', findings: [finding('f1'), finding('f2')] } })
+    decisions = { [self.id]: { approved: ['f1', 'f2'], ignored: [] } }
+    const fix = (id: string) => run('findings-fix-all', { scope: { project: 'app', worktree: WT, ref: self.id }, structured: { url: null, results: [{ id, ok: true, detail: '' }] } })
+    records = [self, fix('f1'), fix('f2')]
+    expect(selfReviewSummary(WT)).toMatchObject({ pending: 0, fixed: ['f1', 'f2'] })
   })
 
   it('garde la dernière auto-review aboutie pendant qu’une nouvelle tourne', () => {
     const done = run('self-review', { structured: { summary: '', findings: [] } })
     records = [done, run('self-review', { status: 'running' })]
-    expect(selfReviewSummary(WT)).toEqual({ running: true, at: done.startedAt, findings: 0, pending: 0 })
+    expect(selfReviewSummary(WT)).toEqual({ running: true, at: done.startedAt, findings: 0, pending: 0, fixed: [] })
   })
 })

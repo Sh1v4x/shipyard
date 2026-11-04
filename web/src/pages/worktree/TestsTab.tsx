@@ -28,6 +28,11 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
   const repos = [{ id: wtId, name: project.name }, ...(detail.linked ?? []).map((l) => ({ id: l.id, name: l.name }))]
   const [skipped, setSkipped] = useState<string[]>([])
   const testOnly = repos.filter((x) => !skipped.includes(x.id)).map((x) => x.id)
+  // Test lancé depuis un worktree lié qui a aussi testé celui-ci, plus récent que le mien : c'est le rapport affiché.
+  const shared = detail.tests.ai?.from ? detail.tests.ai : null
+  useEffect(() => {
+    if (shared && test.id !== shared.runId && !test.busy && (!test.run || test.run.startedAt < shared.at)) test.setId(shared.runId)
+  }, [shared?.runId, test.id, test.busy]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Test de worktrees liés : le correctif part de ce worktree, l'agent travaille aussi dans les dépôts liés.
   const askFix = async (name: string, detailText: string, decided?: string, repo?: string) => {
@@ -80,6 +85,9 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
         <TestMemory project={project.id} wtId={wtId} title="Mémoire de cette branche" hint="temporaire" help="Ce qui ne vaut que pour cette PR : données propres à sa fonctionnalité, écrans touchés, pièges de son code. Lue seulement par les tests de ce worktree, retirée avec lui." placeholder="- Pour cette fonctionnalité, créer la donnée de test avec…" />
       </div>
       <RunPanel id={test.id} events={test.events} running={test.running} run={test.run} label="Installation, suite de tests, puis scénarios" defaultOpen onStop={test.stop} action={test} />
+      {shared && test.id === shared.runId && (
+        <p className="text-sm text-muted-foreground">Test lancé depuis le worktree lié <span className="font-mono">{shared.from}</span> : le rapport est partagé, il compte aussi pour cette PR.</p>
+      )}
       {!test.id && !test.loading && <Empty title="Aucun test lancé sur cette PR pour l’instant." />}
       {r && 'parts' in r ? (
         // Worktrees liés : un dépôt par section dépliable, avec son rapport et sa vidéo.

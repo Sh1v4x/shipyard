@@ -41,6 +41,8 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
     }, (e) => toast(`Choix non enregistré : ${e.message}`, true))
   }
   const fixAll = useAction<FindingsFixAllOutput>('findings-fix-all', { project: project.id, worktree: wtId, ref: self.id ?? undefined })
+  // Corrigées par n'importe quelle correction de cette auto-review, pas seulement la dernière.
+  const fixed = fixedResults(detail.selfReview?.fixed ?? [], fixAll.result?.results ?? [])
   const [open, setOpen] = useState<Record<string, boolean>>({})
 
   if (q.isLoading) return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />Chargement du diff…</div>
@@ -124,7 +126,7 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
                         <div className="flex flex-col gap-2 border-y bg-muted/50 px-3 py-2.5 font-sans">
                           {lineThreads.map((t) => <ThreadNote key={t.id} thread={t} onOpen={() => go({ page: 'worktree', project: project.id, wt: wtId, tab: mine ? 'comments' : 'review' })} />)}
                           {lineFindings.map((x) => mine
-                            ? <FindingNote key={x.id} finding={x as Finding} related={threads.find((t) => t.id === x.relatedThreadId)} project={project.id} wtId={wtId} runId={self.id} decisions={decisions} decide={decide} done={fixAll.result?.results.find((r) => r.id === x.id) ?? null} />
+                            ? <FindingNote key={x.id} finding={x as Finding} related={threads.find((t) => t.id === x.relatedThreadId)} project={project.id} wtId={wtId} runId={self.id} decisions={decisions} decide={decide} done={fixed.get(x.id) ?? null} />
                             : <ProposalNote key={x.id} finding={x} related={threads.some((t) => t.id === x.relatedThreadId)} onOpen={() => go({ page: 'worktree', project: project.id, wt: wtId, tab: 'review' })} />)}
                         </div>
                       )}
@@ -138,18 +140,30 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
         )
       })}
       {mine && self.result && (self.result.findings.length > 0) && (
-        <FindingsBasket findings={self.result.findings} decisions={decisions} decide={decide} fixAll={fixAll} />
+        <FindingsBasket findings={self.result.findings} decisions={decisions} decide={decide} fixAll={fixAll} results={fixed} />
       )}
     </section>
   )
+}
+
+/** Résultat par remarque : celles déjà corrigées (toutes corrections confondues) le restent, la dernière correction complète le reste. */
+function fixedResults(fixedIds: string[], latest: FindingsFixAllOutput['results']): Map<string, { ok: boolean; detail: string }> {
+  const out = new Map(fixedIds.map((id) => [id, { ok: true, detail: 'Corrigé' }]))
+  for (const r of latest) if (!out.get(r.id)?.ok) out.set(r.id, r)
+  return out
 }
 
 /**
  * En bas de l'onglet : les remarques de l'auto-review que j'ai acceptées ou ignorées. Un seul bouton lance un seul agent
  * sur toutes les acceptées (au lieu d'un agent par remarque), puis un seul commit.
  */
-function FindingsBasket({ findings, decisions, decide, fixAll }: { findings: Finding[]; decisions: ReviewDecisions; decide: Decide; fixAll: ReturnType<typeof useAction<FindingsFixAllOutput>> }) {
-  const results = new Map((fixAll.result?.results ?? []).map((r) => [r.id, r]))
+function FindingsBasket({ findings, decisions, decide, fixAll, results }: {
+  findings: Finding[]
+  decisions: ReviewDecisions
+  decide: Decide
+  fixAll: ReturnType<typeof useAction<FindingsFixAllOutput>>
+  results: Map<string, { ok: boolean; detail: string }>
+}) {
   const approved = findings.filter((f) => decisions.approved.includes(f.id))
   const toFix = approved.filter((f) => !results.get(f.id)?.ok)
   const ignored = findings.filter((f) => decisions.ignored.includes(f.id))

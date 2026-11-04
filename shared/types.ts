@@ -345,8 +345,10 @@ export interface TestsSummary {
   /**
    * Dernier test IA terminé. failed : scénarios et tests de la suite en échec, dépôts en erreur.
    * toCheck : scénarios « à vérifier », qu'un test manuel mené jusqu'au bout suffit à couvrir.
+   * Un test lancé depuis un worktree lié qui couvre aussi celui-ci compte pour les deux :
+   * runId est alors le test de l'autre worktree, from le nom de son projet (null pour un test lancé d'ici).
    */
-  ai: { failed: number; toCheck: number; at: string } | null
+  ai: { failed: number; toCheck: number; at: string; runId: string; from: string | null } | null
   /** Dernier test manuel : étapes faites (cochées, ou conformes à leur vérification) sur le total. */
   manual: { done: number; total: number; at: string } | null
 }
@@ -358,6 +360,8 @@ export interface SelfReviewSummary {
   findings: number
   /** Remarques sans décision, ou acceptées mais pas encore corrigées. */
   pending: number
+  /** Remarques déjà corrigées, par n'importe quelle correction de cette auto-review (liste commune ou une par une). */
+  fixed: string[]
 }
 
 export interface LinkedDirty {

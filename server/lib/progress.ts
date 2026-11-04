@@ -32,6 +32,18 @@ function testPoints(run: RunRecord | null): { failed: number; toCheck: number } 
   }
 }
 
+/** Dernier test IA qui couvre ce worktree : lancé d'ici, ou depuis un worktree lié qui l'a testé avec le sien. */
+function latestTest(worktree: string, success: boolean): RunRecord | null {
+  let best: RunRecord | null = null
+  for (const r of allRuns()) {
+    if (r.kind !== 'test' || (success && r.status !== 'success')) continue
+    const parts = (r.structured as MultiTestOutput | null | undefined)?.parts
+    const covers = r.scope.worktree === worktree || !!parts?.some((p) => p.worktree === worktree && !p.carriedAt)
+    if (covers && (!best || r.startedAt > best.startedAt)) best = r
+  }
+  return best
+}
+
 export const testIssues = (run: RunRecord | null) => {
   const p = testPoints(run)
   return p.failed + p.toCheck
@@ -62,11 +74,14 @@ export function manualTest(worktree: string): { run: RunRecord; steps: ManualSte
 }
 
 export function testsSummary(worktree: string): TestsSummary {
-  const ai = latest(worktree, 'test', { success: true })
+  const ai = latestTest(worktree, true)
   const manual = manualTest(worktree)
+  const from = ai && ai.scope.worktree !== worktree
+    ? (ai.structured as MultiTestOutput).parts.find((p) => p.worktree === ai.scope.worktree)?.projectName ?? ai.scope.project
+    : null
   return {
-    running: latest(worktree, 'test')?.status === 'running' || latest(worktree, 'test-manual')?.status === 'running',
-    ai: ai ? { ...testPoints(ai), at: ai.startedAt } : null,
+    running: latestTest(worktree, false)?.status === 'running' || latest(worktree, 'test-part')?.status === 'running' || latest(worktree, 'test-manual')?.status === 'running',
+    ai: ai ? { ...testPoints(ai), at: ai.startedAt, runId: ai.id, from } : null,
     manual: manual ? { done: manual.steps.filter((s) => s.done).length, total: manual.steps.length, at: manual.run.startedAt } : null,
   }
 }
@@ -78,9 +93,15 @@ export function selfReviewSummary(worktree: string): SelfReviewSummary | null {
   const done = last.status === 'success' ? last : latest(worktree, 'self-review', { success: true })
   const findings = (done?.structured as ReviewOutput | null | undefined)?.findings ?? []
   const decisions = done ? readJsonFile<Partial<ReviewDecisions>>(reviewDecisionsPath(done.id)) : null
-  const fixAll = done ? (latest(worktree, 'findings-fix-all', { ref: done.id, success: true })?.structured as FindingsFixAllOutput | null | undefined) : null
-  const fixed = (id: string) =>
-    !!fixAll?.results.some((r) => r.id === id && r.ok) || !!(done && latest(worktree, 'finding-fix', { ref: `${done.id}:${id}`, success: true }))
+  // Toutes les corrections réussies comptent : une nouvelle correction (d'une remarque restante) ne défait pas les précédentes.
+  const fixedAll = new Set<string>()
+  if (done) {
+    for (const r of allRuns()) {
+      if (r.kind !== 'findings-fix-all' || r.scope.worktree !== worktree || r.scope.ref !== done.id || r.status !== 'success') continue
+      for (const x of (r.structured as FindingsFixAllOutput | null | undefined)?.results ?? []) if (x.ok) fixedAll.add(x.id)
+    }
+  }
+  const fixed = (id: string) => fixedAll.has(id) || !!(done && latest(worktree, 'finding-fix', { ref: `${done.id}:${id}`, success: true }))
   const pending = findings.filter((f) => !decisions?.ignored?.includes(f.id) && !fixed(f.id)).length
-  return { running: last.status === 'running', at: done?.startedAt ?? null, findings: findings.length, pending }
+  return { running: last.status === 'running', at: done?.startedAt ?? null, findings: findings.length, pending, fixed: findings.filter((f) => fixed(f.id)).map((f) => f.id) }
 }

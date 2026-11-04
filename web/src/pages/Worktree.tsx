@@ -244,7 +244,7 @@ function testsSection({ d, partial, rules }: PrState): Section {
   if (t.ai?.failed) return { ...base, state: 'ko', summary: `IA : ${plural(t.ai.failed, 'échec', 'échecs')}` }
   if (t.manual && !manualDone(t)) return { ...base, state: 'warn', summary: manual ?? '' }
   if (t.ai?.toCheck && !t.manual) return { ...base, state: 'warn', summary: `IA : ${t.ai.toCheck} à vérifier` }
-  if (testsDone(t)) return { ...base, state: 'ok', summary: [t.ai && 'IA', manual].filter(Boolean).join(' · ') }
+  if (testsDone(t)) return { ...base, state: 'ok', summary: [t.ai && (t.ai.from ? `IA (via ${t.ai.from})` : 'IA'), manual].filter(Boolean).join(' · ') }
   return { ...base, ...(d.pr && needsTesting(d.pr, rules) ? { state: 'warn', summary: 'à tester' } : { state: 'wait', summary: 'à lancer' }) }
 }
 
@@ -282,7 +282,7 @@ function buildSections(state: PrState): Section[] {
   const fresh = (checks ?? []).filter((r) => !r.stale)
   const checksState: Section = {
     key: 'checks', label: 'Contrôles', group: 'status',
-    ...(!checks ? { state: 'wait', summary: '…' } : !checks.length ? { state: 'wait', summary: 'aucun' } : fresh.some((r) => r.status === 'fail') ? { state: 'ko', summary: plural(fresh.filter((r) => r.status === 'fail').length, 'échec', 'échecs') } : fresh.some((r) => r.status === 'warn') ? { state: 'warn', summary: 'à regarder' } : fresh.length < checks.length ? { state: 'run', summary: 'en retard' } : { state: 'ok', summary: 'rien à signaler' }),
+    ...(!checks ? { state: 'wait', summary: '…' } : !checks.length ? { state: 'ok', summary: 'aucun' } : fresh.some((r) => r.status === 'fail') ? { state: 'ko', summary: plural(fresh.filter((r) => r.status === 'fail').length, 'échec', 'échecs') } : fresh.some((r) => r.status === 'warn') ? { state: 'warn', summary: 'à regarder' } : fresh.length < checks.length ? { state: 'run', summary: 'en retard' } : { state: 'ok', summary: 'rien à signaler' }),
   }
   const ciState = (p: PullRequest): Section => {
     const jobs = p.ci.jobs.filter((j) => j.state !== 'skipped')

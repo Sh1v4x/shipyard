@@ -667,6 +667,19 @@ export function generalComments(repo: string, num: number, force = false): Promi
   }, force)
 }
 
+const membersCache = ttlCache<string[]>(3_600_000)
+
+/** Membres humains du dépôt (ceux à qui on peut assigner une PR), bots exclus. */
+export function repoMembers(repo: string): Promise<string[]> {
+  return membersCache.get(repo, async () => {
+    const data = await graphql<{ repository: { assignableUsers: { nodes: { login: string }[] } } }>(
+      'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){assignableUsers(first:100){nodes{login}}}}',
+      split(repo),
+    )
+    return data.repository.assignableUsers.nodes.map((u) => u.login).filter((l) => !/\[bot\]$|^coderabbitai$/.test(l))
+  })
+}
+
 const candidatesCache = ttlCache<ReviewerCandidate[]>(600_000)
 
 /** Qui peut reviewer ma PR : les suggestions de GitHub d'abord, puis les autres membres du dépôt (ni moi, ni les bots). */

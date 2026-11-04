@@ -262,6 +262,8 @@ export interface ProjectOverview {
   /** File d'attente du projet : une ligne par PR, branche ou ticket, rangée par ce qu'elle attend (voir shared/queue.ts). */
   queue: QueueItem[]
   linearConfigured: boolean
+  /** Je suis le seul humain qui contribue au dépôt (bots exclus) : pas de reviewer à demander, ma PR se merge quand tout est vert. */
+  solo: boolean
   errors: string[]
   fetchedAt: string
 }
@@ -335,6 +337,8 @@ export interface WorktreeDetail {
   linked?: LinkedDirty[]
   /** Où en sont les tests de la branche (IA et manuel). */
   tests: TestsSummary
+  /** Projet où je suis le seul contributeur humain : pas d'étape Reviewers (voir ProjectOverview.solo). */
+  solo: boolean
   /** Dernière auto-review, null si jamais lancée. */
   selfReview: SelfReviewSummary | null
 }

@@ -243,8 +243,13 @@ async function loadOverview(project: Project, force: boolean): Promise<ProjectOv
   // Reviews à faire : demandées sur GitHub, ou PR déjà reviewées que l'auteur a remises en « Waiting review ».
   const toReview = [...new Set([...requested.map((p) => p.number), ...openReviewPrs.filter((p) => awaitsReview(p, rules)).map((p) => p.number)])]
   const reviews = toReview.length
+  const login = await gh.me().catch(warnOn('gh.me', null))
+  // Seul contributeur humain : la liste des membres du dépôt, sans moi ni les bots, est vide. En cas de doute, non.
+  const members = await gh.repoMembers(project.repo).catch(warnOn('gh.repoMembers', null))
+  const solo = !!login && !!members && members.every((m) => m === login)
   const ov = {
     project,
+    solo,
     worktrees: worktrees.filter((w) => !w.isMain),
     tickets,
     myPrs: mine,
@@ -255,7 +260,7 @@ async function loadOverview(project: Project, force: boolean): Promise<ProjectOv
     errors,
     fetchedAt: new Date().toISOString(),
   }
-  return { ...ov, ghosts: {}, queue: buildQueue(ov, rules, await gh.me().catch(warnOn('gh.me', null))) }
+  return { ...ov, ghosts: {}, queue: buildQueue(ov, rules, login) }
 }
 
 // ---------- Worktree ----------
@@ -316,7 +321,7 @@ export async function worktreeDetail(project: Project, wtId: string, force = fal
   const linked = await Promise.all((await linkedWorktrees(worktree)).map(async (l) => ({
     project: l.project.id, name: l.project.name, id: l.worktree.id, path: l.worktree.path, branch: l.worktree.branch, dirtyFiles: await git.dirtyFiles(l.worktree.path).catch(() => []),
   })))
-  return { project, worktree, ticket, pr, commitsAhead, dirtyFiles, merge, behindBase, behindRemote, remoteAuthors, linked, tests: testsSummary(wtId), selfReview: selfReviewSummary(wtId) }
+  return { project, worktree, ticket, pr, commitsAhead, dirtyFiles, merge, behindBase, behindRemote, remoteAuthors, linked, solo: ov.solo, tests: testsSummary(wtId), selfReview: selfReviewSummary(wtId) }
 }
 
 /**

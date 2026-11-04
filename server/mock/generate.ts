@@ -279,6 +279,7 @@ function todoCounts(): TodoCounts {
 
 const overviewBase: Omit<ProjectOverview, 'queue'> = {
   project,
+  solo: false,
   ghosts: {},
   worktrees,
   tickets,
@@ -311,7 +312,7 @@ interface WtData {
 function addWorktree(w: Worktree, d: WtData = {}) {
   const p = [...myPrs, ...reviewPrs].find((x) => x.number === w.prNumber) ?? null
   const t = tickets.find((x) => x.id === w.ticketId) ?? null
-  routes[base(w)] = { project, worktree: w, ticket: t, pr: p, commitsAhead: [], dirtyFiles: [], merge: null, behindBase: 0, behindRemote: 0, remoteAuthors: [], linked: [], tests: { running: false, ai: null, manual: null }, selfReview: null, ...d.detail } satisfies WorktreeDetail
+  routes[base(w)] = { project, worktree: w, ticket: t, pr: p, commitsAhead: [], dirtyFiles: [], merge: null, behindBase: 0, behindRemote: 0, remoteAuthors: [], solo: false, linked: [], tests: { running: false, ai: null, manual: null }, selfReview: null, ...d.detail } satisfies WorktreeDetail
   const files = d.files ?? []
   routes[`${base(w)}/stat`] = {
     branch: w.branch, title: w.kind === 'review' ? (p?.title ?? null) : null, base: p?.base ?? project.baseBranch,

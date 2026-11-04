@@ -233,11 +233,13 @@ function nextStep({ d, threads, checks, sdk, rules, me }: PrState): NextStep {
     if (needsChanges(pr, rules)) return { tone: 'amber', title: `Label « ${labelWithRole(rules, 'changes', pr.labels)?.name} » sans commentaire ouvert`, detail: 'Une modification est peut-être encore attendue, ou le label est resté.', tab: 'reviewers', label: 'Voir les reviewers' }
     const who = reviewersToRerequest(pr, rules)
     if (who.length) return { tone: 'amber', title: `Commentaires traités : relancer ${who.join(', ')}`, detail: null, tab: 'reviewers', label: 'Relancer la review' }
-    if (needsReviewer(pr, rules)) return { tone: 'amber', title: 'Aucun reviewer sur la PR', detail: 'Personne ne la regarde tant que tu n’as pas demandé de review.', tab: 'reviewers', label: 'Demander une review' }
+    if (!d.solo && needsReviewer(pr, rules)) return { tone: 'amber', title: 'Aucun reviewer sur la PR', detail: 'Personne ne la regarde tant que tu n’as pas demandé de review.', tab: 'reviewers', label: 'Demander une review' }
     if (needsTesting(pr, rules) && !testsDone(d.tests)) return { tone: 'purple', title: 'À tester avant de merger', detail: null, tab: 'tests', label: 'Tester' }
     if (pr.isDraft) return { tone: 'gray', title: 'Brouillon', detail: 'Passe-la en « prête pour review » sur GitHub quand le travail est fini.', url: pr.url, label: 'Ouvrir sur GitHub' }
     if (labelWithRole(rules, 'approved', pr.labels) || pr.reviewDecision === 'APPROVED') return { tone: 'green', title: pr.conflictsUnknown ? 'Approuvée : GitHub vérifie encore les conflits' : 'Prête à merger', detail: null, url: pr.url, label: 'Merger sur GitHub' }
     if (pr.ci.state === 'running') return { tone: 'blue', title: 'CI en cours', detail: null, tab: 'ci', label: 'Suivre la CI' }
+    // Seul contributeur : personne à attendre, tout est vert.
+    if (d.solo) return { tone: 'green', title: pr.conflictsUnknown ? 'GitHub vérifie encore les conflits' : 'Prête à merger', detail: null, url: pr.url, label: 'Merger sur GitHub' }
     const wait = waitingInfo(pr, me)
     return { tone: 'gray', title: pr.requestedReviewers.length ? `En attente de review de ${pr.requestedReviewers.join(', ')}` : 'En attente', detail: wait ? `${wait.label} depuis ${since(wait.since)}` : null }
   }

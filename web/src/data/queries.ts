@@ -153,6 +153,7 @@ function detailFromOverview(qc: QueryClient, project: string, wt: string): Workt
     behindBase: 0,
     behindRemote: 0,
     remoteAuthors: [],
+    solo: ov.solo ?? false,
     // Inconnus tant que la vraie réponse n'est pas arrivée : la page affiche « … » (voir isPlaceholderData).
     tests: { running: false, ai: null, manual: null },
     selfReview: null,

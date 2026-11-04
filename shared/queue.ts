@@ -24,7 +24,7 @@ const RANK: Record<QueueTone, number> = { red: 0, amber: 1, purple: 2, blue: 3, 
 const worst = (reasons: Reason[]): QueueTone => reasons.reduce<QueueTone>((t, r) => (RANK[r.tone] < RANK[t] ? r.tone : t), 'gray')
 
 /** Ce que ma PR attend de moi, du plus bloquant au moins bloquant (même ordre que l'onglet par défaut du worktree). */
-function myPrReasons(pr: PullRequest, rules: LabelRules): (Reason & { tab: string; action: string })[] {
+function myPrReasons(pr: PullRequest, rules: LabelRules, solo: boolean): (Reason & { tab: string; action: string })[] {
   const out: (Reason & { tab: string; action: string })[] = []
   if (pr.conflicts) out.push({ label: `Conflits avec ${pr.base}`, tone: 'red', tab: 'conflicts', action: 'Résoudre' })
   if (pr.unresolvedThreads) out.push({ label: plural(pr.unresolvedThreads, 'commentaire', 'commentaires'), tone: 'amber', tab: 'comments', action: 'Traiter' })
@@ -35,7 +35,7 @@ function myPrReasons(pr: PullRequest, rules: LabelRules): (Reason & { tab: strin
     const who = reviewersToRerequest(pr, rules)
     if (who.length) out.push({ label: `${who.join(', ')} à relancer`, tone: 'amber', tab: 'reviewers', action: 'Relancer' })
   }
-  if (needsReviewer(pr, rules)) out.push({ label: 'Aucun reviewer', tone: 'amber', tab: 'reviewers', action: 'Demander une review' })
+  if (!solo && needsReviewer(pr, rules)) out.push({ label: 'Aucun reviewer', tone: 'amber', tab: 'reviewers', action: 'Demander une review' })
   return out
 }
 
@@ -55,13 +55,17 @@ export function buildQueue(ov: Omit<ProjectOverview, 'queue' | 'ghosts'>, rules:
       action: w ? { label: 'Ouvrir', tab: undefined } : null, since: wait?.since ?? pr.updatedAt,
     }
     if (pr.mine) {
-      const reasons = myPrReasons(pr, rules)
+      const reasons = myPrReasons(pr, rules, ov.solo)
       if (reasons.length) {
         return { ...base, group: 'me', tone: worst(reasons), reasons: reasons.map(({ label, tone }) => ({ label, tone })), detail: [size(pr), wait && `${wait.label} · ${since(wait.since)}`].filter(Boolean).join(' · '), action: w ? { label: reasons[0].action, tab: reasons[0].tab } : null }
       }
       const reasonsWaiting: Reason[] = []
       if (pr.isDraft) reasonsWaiting.push({ label: 'Brouillon', tone: 'gray' })
       if (pr.ci.state === 'running') reasonsWaiting.push({ label: `CI en cours · ${pr.ci.jobs.filter((j) => j.state === 'pass').length}/${pr.ci.total}`, tone: 'blue' })
+      // Seul contributeur : personne d'autre à attendre, la PR se merge dès que la CI a fini.
+      if (ov.solo && !pr.isDraft && pr.ci.state !== 'running' && !isApproved(pr, rules)) {
+        return { ...base, group: 'me', tone: 'green', reasons: [{ label: 'Prête à merger', tone: 'green' }], detail: size(pr), action: { label: 'Merger', url: pr.url } }
+      }
       if (isApproved(pr, rules)) reasonsWaiting.push(pr.conflictsUnknown ? { label: 'Approuvée · conflits en vérification', tone: 'amber' } : { label: 'Prête à merger', tone: 'green' })
       else if (pr.requestedReviewers.length) reasonsWaiting.push({ label: `Review demandée à ${pr.requestedReviewers.join(', ')}`, tone: 'gray' })
       return { ...base, tone: isApproved(pr, rules) ? 'green' : 'gray', reasons: reasonsWaiting, detail: [size(pr), wait && `${wait.label} · ${since(wait.since)}`].filter(Boolean).join(' · '), action: isApproved(pr, rules) ? { label: 'Merger', url: pr.url } : base.action }

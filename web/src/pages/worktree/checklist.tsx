@@ -110,7 +110,8 @@ export function buildSections(state: PrState): Section[] {
     out.push(ciState(pr), sdkState, checksState)
     const humans = pr.reviews.filter((r) => !/\[bot\]$|^coderabbitai$/.test(r.login))
     const approved = humans.filter((r) => r.state === 'APPROVED').length
-    out.push({
+    // Seul contributeur du dépôt : pas d'étape Reviewers.
+    if (!d.solo) out.push({
       key: 'reviewers', label: 'Reviewers', group: 'status',
       ...(humans.some((r) => r.state === 'CHANGES_REQUESTED') ? { state: 'ko', summary: 'changements' } : reviewersToRerequest(pr, rules).length ? { state: 'warn', summary: 'à relancer' } : approved ? { state: 'ok', summary: plural(approved, 'approbation', 'approbations') } : pr.requestedReviewers.length ? { state: 'wait', summary: 'en attente' } : needsReviewer(pr, rules) ? { state: 'warn', summary: 'à demander' } : { state: 'wait', summary: 'aucun' }),
     })

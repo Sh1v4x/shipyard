@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useCreateLocalTicketWorktree } from '../data/mutations.ts'
 import { useDigest } from '../data/queries.ts'
-import { useAction } from '../data/runs.ts'
+import { useAction, useStartAction } from '../data/runs.ts'
 import { go } from '../router.ts'
 import { Badge, Empty, Pill, PromptMenu, RunPanel, Spinner, plural, useToast, type Tone } from '../ui.tsx'
 
@@ -108,6 +108,24 @@ function Results({ project, result }: { project: Project; result: InsightsOutput
   // Remarques cochées : traitées ensemble dans un seul worktree (un ticket local qui les regroupe).
   const [picked, setPicked] = useState<number[]>([])
   const toggle = (n: number) => setPicked((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n]))
+  const create = useCreateLocalTicketWorktree(project.id)
+  const startAction = useStartAction()
+  const busyAll = create.isPending || startAction.isPending
+
+  // « Tout traiter » : un worktree pour toutes les remarques affichées, et l'IA s'y met aussitôt, sans plan à valider.
+  // Rien n'est commité : le compte rendu s'approuve dans l'onglet Ticket, comme un travail ordinaire.
+  const doAll = async () => {
+    if (!confirm(`Traiter les ${items.length} remarques dans un seul worktree ? L’IA les applique toutes sans plan à valider. Rien n’est commité avant ton accord.`)) return
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')
+    try {
+      const wt = await create.mutateAsync({ branch: `fix/project-review-${stamp}`, item: mergeItems(items) })
+      await startAction.mutateAsync({ kind: 'ticket', input: { project: project.id, worktree: wt.id, extra: APPLY_ALL } })
+      toast('Worktree créé : l’IA applique toutes les remarques')
+      go({ page: 'worktree', project: project.id, wt: wt.id, tab: 'ticket' })
+    } catch (e) {
+      toast((e as Error).message, true)
+    }
+  }
   const categories = [...new Set(result.items.map((i) => i.category))]
   const items = result.items.filter((i) => !filter || i.category === filter)
 
@@ -122,8 +140,12 @@ function Results({ project, result }: { project: Project; result: InsightsOutput
 
   return (
     <section className="flex flex-col gap-4" aria-label="Propositions">
-      <div className="rounded-xl border bg-card p-5">
+      <div className="flex flex-col gap-3 rounded-xl border bg-card p-5">
         <p className="text-sm leading-relaxed">{result.summary}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" disabled={busyAll || !items.length} onClick={() => void doAll()}>{busyAll ? <Spinner /> : <GitBranchPlusIcon />}Tout traiter dans un worktree · {items.length}</Button>
+          <span className="text-xs text-muted-foreground">{filter ? `Les remarques « ${filter} » affichées.` : 'Toutes les remarques.'} Ou coche celles à garder.</span>
+        </div>
       </div>
       {categories.length > 1 && (
         <div className="flex flex-wrap gap-2">
@@ -161,6 +183,9 @@ function Results({ project, result }: { project: Project; result: InsightsOutput
     </section>
   )
 }
+
+/** Consigne du travail lancé par « Tout traiter » : le ticket local liste les remarques, toutes à appliquer. */
+const APPLY_ALL = 'Apply every finding listed in the ticket, one after the other, each as its proposal says. If one turns out to be wrong or impossible once you read the code, skip it and say why in your output.'
 
 const RANK_EFFORT = ['S', 'M', 'L'] as const
 const RANK_IMPACT = ['faible', 'moyen', 'fort'] as const

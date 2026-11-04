@@ -89,6 +89,8 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
     return plan.start({ extra, feedback, previousRunId: feedback ? plan.id : undefined })
   }
   const canRestart = !!plan.id && !decided && !plan.busy && !workRunning && !restart
+  // Travail lancé sans plan (« Tout traiter » depuis l'analyse du projet) : sa consigne fait office de plan pour les corrections.
+  const workExtra = extra || work.run?.input?.extra || ''
 
   return (
     <article className="flex min-w-0 flex-[1.4_1_420px] flex-col gap-4 rounded-xl border bg-card p-5">
@@ -165,7 +167,7 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
       {workIsCurrent && !plan.busy && !decided && !restart && (
         <>
           <RunPanel id={work.id} events={work.events} running={work.running} run={work.run} label="L’IA travaille (captures avant, code, captures après)" defaultOpen onStop={work.stop} action={sinceFresh(work)} />
-          {work.result && work.run && <WorkResult project={project.id} run={work.run} result={work.result} planRunId={plan.id} onRestart={(fb) => work.start({ planRunId: plan.id, extra, feedback: fb, resumeFrom: work.id })} onRetest={() => work.start({ planRunId: plan.id, retest: true, resumeFrom: work.id })} />}
+          {work.result && work.run && <WorkResult project={project.id} run={work.run} result={work.result} planRunId={plan.id} restartable={!!plan.id || !!workExtra} onRestart={(fb) => work.start({ planRunId: plan.id ?? undefined, extra: workExtra, feedback: fb, resumeFrom: work.id ?? undefined })} onRetest={() => work.start({ planRunId: plan.id ?? undefined, extra: workExtra, retest: true, resumeFrom: work.id ?? undefined })} />}
           {work.failed && work.run?.status !== 'success' && (
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={() => work.start({ planRunId: plan.id, extra })}>Relancer le travail</Button>

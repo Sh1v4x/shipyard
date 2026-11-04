@@ -15,6 +15,19 @@ import { type ProjectActions, type WorktreeAction, type WorktreeActions, branchC
 import { createCheckout, releaseCheckout } from './checkouts.ts'
 import { shotsDirOf } from '../lib/runArtifacts.ts'
 
+/** Ce que demande chaque mode de « Features & optimisations ». */
+const INSIGHTS_MODE: Record<InsightsMode, string> = {
+  features: 'Ideas for new product features: what users are missing, what the existing data or screens would almost already allow, incomplete user flows. Each idea must be realistic in this code (category: feature).',
+  improve: 'Areas of improvement for the existing code: performance, security, technical debt, missing tests, accessibility, UX, developer experience, architecture. Precise findings, with the files and what needs to change.',
+  // La review d'une PR porte sur un diff : ici, la même exigence sur tout le code du dépôt.
+  review: [
+    'A review of the whole project, as strict as the review of a PR whose diff would be the entire codebase. Apply the team dev rules and review standard below (they win over your own preferences):',
+    '1. Fast pass: run the mechanical checks of the review standard and of the audit checklist across the repository with Grep (arbitrary Tailwind values, raw elements, string literals where an enum exists, locale/country/currency hardcoding, console.log, avoidable casts, comments…). Check every hit in the code before keeping it.',
+    '2. Then read by hand, area by area (use subagents in parallel): correctness (inverted logic, unhandled edge cases, silent fallbacks, race conditions, missing cleanup), security, architecture as the standard demands (shared code in packages/, enums, no hardcoding, duplicated rules), dead code, hand-rolled code where a library or helper exists, database/money/types/tests/async as the checklist says.',
+    'Each finding names the rule or the bug, the files, and the fix. Category: bug, sécurité, convention, architecture, dette, tests or performance. Impact: fort for a bug, a security hole or a hard rule broken.',
+  ].join('\n'),
+}
+
 /** Plan validé, mis en forme pour le prompt de travail. */
 function formatPlan(p: TicketPlanOutput): string {
   return [
@@ -168,16 +181,17 @@ export const ticketsProjectActions: ProjectActions = {
     )
   },
   insights: async ({ kind, input, project }) => {
-    const mode: InsightsMode = input.insights === 'improve' ? 'improve' : 'features'
+    const mode: InsightsMode = input.insights === 'improve' || input.insights === 'review' ? input.insights : 'features'
     const digest = await buildDigest(project, input.digest === 'map' ? 'map' : 'auto')
     const grouped = groupedProjects(project).filter((p) => existsSync(p.path))
     return startRun(
       specFrom('insights', {
         'project.name': project.name,
         repo: project.repo,
-        mode: mode === 'features'
-          ? 'Ideas for new product features: what users are missing, what the existing data or screens would almost already allow, incomplete user flows. Each idea must be realistic in this code (category: feature).'
-          : 'Areas of improvement for the existing code: performance, security, technical debt, missing tests, accessibility, UX, developer experience, architecture. Precise findings, with the files and what needs to change.',
+        mode: INSIGHTS_MODE[mode],
+        count: mode === 'review'
+          ? '10 to 30 findings, depending on what the code justifies. Group a recurring problem into one finding that lists every file where it occurs.'
+          : '5 to 12 proposals, depending on what the project justifies. Better 5 solid proposals than 12 average ones.',
         'digest.path': digest.path,
         'digest.mode': digest.mode === 'full' ? 'Full digest: the content of every analyzed file' : 'Project map only (tree and key files): the repository is too large for a full digest, read the rest of the code directly',
         'digest.stats': `${digest.files} files, ~${Math.round(digest.digestTokens / 1000)}k tokens, commit ${digest.sha}`,
@@ -185,7 +199,7 @@ export const ticketsProjectActions: ProjectActions = {
         others: grouped.length ? grouped.map((p) => `  - ${p.name} (${p.repo}): ${p.path}`).join('\n') : '  (none)',
         rules: rulesFor(project.id),
       }, {
-        kind, title: mode === 'features' ? 'Idées de features' : 'Axes d’amélioration', scope: { project: project.id, ref: mode }, cwd: project.path,
+        kind, title: { features: 'Idées de features', improve: 'Axes d’amélioration', review: 'Analyse du projet' }[mode], scope: { project: project.id, ref: mode }, cwd: project.path,
         schema: schemas.insightsSchema, addDirs: [DIGESTS_DIR, ...grouped.map((p) => p.path)], request: input.extra?.trim() || null,
       }),
     )

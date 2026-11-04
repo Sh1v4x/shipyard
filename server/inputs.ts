@@ -102,7 +102,7 @@ export const actionInput = z.object({
   since: optional(isoDay),
   until: optional(isoDay),
   retest: optional(z.boolean()),
-  insights: optional(z.enum(['features', 'improve'])),
+  insights: optional(z.enum(['features', 'improve', 'review'])),
   digest: optional(z.enum(['auto', 'map'])),
   autofix: optional(z.boolean()),
   items: optional(z.array(z.object({ threadId: z.string(), verdict: z.enum(['fix', 'skip']), action: z.string().optional(), reply: z.string().optional() }))),

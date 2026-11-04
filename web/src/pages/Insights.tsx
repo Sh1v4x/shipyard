@@ -1,4 +1,4 @@
-import { CopyIcon, DownloadIcon, FileTextIcon, GitBranchPlusIcon, LightbulbIcon, PlayIcon, TicketPlusIcon, WrenchIcon } from 'lucide-react'
+import { CopyIcon, DownloadIcon, FileTextIcon, GitBranchPlusIcon, LightbulbIcon, PlayIcon, ScanSearchIcon, TicketPlusIcon, WrenchIcon } from 'lucide-react'
 import { useState } from 'react'
 import type { InsightItem, InsightsMode, InsightsOutput, Project } from '../../../shared/types.ts'
 import { Button } from '@/components/ui/button'
@@ -14,18 +14,19 @@ import { Badge, Empty, Pill, PromptMenu, RunPanel, Spinner, plural, useToast, ty
 
 const MODES: { key: InsightsMode; label: string; icon: typeof LightbulbIcon; help: string; start: string }[] = [
   { key: 'features', label: 'Nouvelles features', icon: LightbulbIcon, help: 'Ce qui manque aux utilisateurs, ce que les données et les écrans existants permettraient presque déjà, les parcours incomplets.', start: 'Proposer des features' },
+  { key: 'review', label: 'Analyser le projet', icon: ScanSearchIcon, help: 'La review de PR appliquée à tout le code : mêmes règles et même standard de review, mêmes vérifications. Bugs, failles, règles non suivies, dette, avec les fichiers et la correction.', start: 'Analyser le projet' },
   { key: 'improve', label: 'Axes d’amélioration', icon: WrenchIcon, help: 'Performance, sécurité, dette technique, tests, accessibilité, UX, expérience de développement, architecture : constats précis dans le code.', start: 'Trouver des axes d’amélioration' },
 ]
 
 const IMPACT: Record<InsightItem['impact'], Tone> = { fort: 'green', moyen: 'amber', faible: 'gray' }
-const CATEGORY: Record<string, Tone> = { feature: 'blue', performance: 'amber', sécurité: 'red', dette: 'purple', tests: 'purple', accessibilité: 'blue', ux: 'blue', dx: 'gray', architecture: 'purple' }
+const CATEGORY: Record<string, Tone> = { bug: 'red', convention: 'amber', feature: 'blue', performance: 'amber', sécurité: 'red', dette: 'purple', tests: 'purple', accessibilité: 'blue', ux: 'blue', dx: 'gray', architecture: 'purple' }
 
 /** Texte d'une proposition, repris tel quel comme feature à rédiger en ticket ou comme consigne. */
 const asText = (i: InsightItem) => [i.title, '', i.why, '', i.proposal, i.files.length ? `\nFichiers : ${i.files.join(', ')}` : '', i.risk ? `\nRisque : ${i.risk}` : ''].filter((x) => x !== '').join('\n')
 
 /** Features & optimisations : un agent lit le digest du dépôt (façon gitingest) et le code, puis propose. */
 export function InsightsPage({ project, mode: routeMode }: { project: Project; mode?: string }) {
-  const mode: InsightsMode = routeMode === 'improve' ? 'improve' : 'features'
+  const mode: InsightsMode = routeMode === 'improve' || routeMode === 'review' ? routeMode : 'features'
   const m = MODES.find((x) => x.key === mode)!
   const action = useAction<InsightsOutput>('insights', { project: project.id, ref: mode }, { insights: mode })
   const [extra, setExtra] = useState('')
@@ -56,7 +57,7 @@ export function InsightsPage({ project, mode: routeMode }: { project: Project; m
         <div className="flex flex-col gap-2">
           <FieldLabel htmlFor="insights-extra">Consigne <span className="font-normal text-muted-foreground">(facultatif)</span></FieldLabel>
           <Textarea id="insights-extra" rows={2} value={extra} onChange={(e) => setExtra(e.target.value)}
-            placeholder={mode === 'features' ? 'Ex. : côté mobile uniquement, autour du panier, pour les clients professionnels…' : 'Ex. : seulement la perf de l’API, la sécurité des routes publiques…'} />
+            placeholder={{ features: 'Ex. : côté mobile uniquement, autour du panier, pour les clients professionnels…', improve: 'Ex. : seulement la perf de l’API, la sécurité des routes publiques…', review: 'Ex. : seulement apps-v2/api, ou seulement le module comptabilité…' }[mode]} />
         </div>
         <div>
           <Button disabled={action.busy} onClick={() => action.start({ extra })}>{action.busy ? <Spinner /> : <PlayIcon />}{m.start}</Button>

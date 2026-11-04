@@ -708,12 +708,15 @@ export interface DigestInfo {
   fullPossible: boolean
 }
 
-export type InsightsMode = 'features' | 'improve'
+export type InsightsMode = 'features' | 'improve' | 'review'
 
 /** Proposition de l'analyse « Features & optimisations ». */
 export interface InsightItem {
   title: string
-  /** Feature : « feature » ; amélioration : performance, sécurité, dette, tests, accessibilité, ux, dx, architecture. */
+  /**
+   * Feature : « feature » ; amélioration : performance, sécurité, dette, tests, accessibilité, ux, dx, architecture ;
+   * analyse du projet : bug, sécurité, convention, architecture, dette, tests, performance.
+   */
   category: string
   /** Constat ou besoin : pourquoi c'est utile, d'après le code. */
   why: string

@@ -282,7 +282,7 @@ export const insightsSchema = {
         type: 'object',
         properties: {
           title: s('Short and telling'),
-          category: { type: 'string', enum: ['feature', 'performance', 'sécurité', 'dette', 'tests', 'accessibilité', 'ux', 'dx', 'architecture'] },
+          category: { type: 'string', enum: ['feature', 'bug', 'convention', 'performance', 'sécurité', 'dette', 'tests', 'accessibilité', 'ux', 'dx', 'architecture'] },
           why: s('Observation or need, backed by the code'),
           proposal: s('What to do, concretely'),
           files: { type: 'array', items: { type: 'string' } },

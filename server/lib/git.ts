@@ -183,8 +183,18 @@ export async function commitFiles(cwd: string, title: string, files: string[] | 
   return (await git(cwd, ['rev-parse', 'HEAD'])).trim()
 }
 
+/** Refus passager de GitHub (erreur interne, réseau) : le même push passe en général au deuxième essai. */
+const TRANSIENT_PUSH = /fatal error in commit_refs|\(failure\)|internal server error|HTTP 5\d\d|RPC failed|early EOF|unexpected disconnect|Connection (reset|timed out)|Could not resolve host/i
+
 export async function push(cwd: string, branch: string) {
-  await git(cwd, ['push', '-u', 'origin', branch], 120_000)
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await git(cwd, ['push', '-u', 'origin', branch], 120_000)
+    } catch (e) {
+      if (attempt >= 3 || !TRANSIENT_PUSH.test(String((e as Error).message))) throw e
+      await new Promise((r) => setTimeout(r, attempt * 5_000))
+    }
+  }
 }
 
 export async function currentBranch(cwd: string): Promise<string> {

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { FindingsFixAllAgentOutput, FindingsFixAllOutput, PrReviewOutput, ReviewOutput, ReviewThread, FixOutput } from '../../shared/types.ts'
 import { HttpError } from '../lib/config.ts'
 import { getRun, listRuns, startJob, startRun, type JobContext, type RunSpec } from '../lib/claude.ts'
+import * as git from '../lib/git.ts'
 import * as gh from '../lib/github.ts'
 import { rulesFor } from '../lib/rules.ts'
 import * as schemas from '../schemas.ts'
@@ -113,6 +114,13 @@ async function reReviewContext(repo: string, num: number, threads: ReviewThread[
   }
 }
 
+/** Le commit est fait (rien en attente dans le worktree) et la branche a des commits que GitHub n'a pas : seul le push a échoué. */
+async function committedNotPushed(cwd: string, branch: string | null): Promise<boolean> {
+  if (!branch) return false
+  const [dirty, unpushed] = await Promise.all([git.dirtyFiles(cwd).catch(() => null), git.unpushedCount(cwd, branch)])
+  return !!dirty && !dirty.length && unpushed > 0
+}
+
 export const reviewActions: WorktreeActions = {
   'self-review': async ({ kind, project, scope, cwd, needPr, vars }) => {
     const pr = needPr()
@@ -220,9 +228,13 @@ export const reviewActions: WorktreeActions = {
           url = await commitAndPush(d, out.commitTitle)
           ctx.log({ t: 'info', text: url ? `Commit poussé : ${url}` : 'Aucun changement à commiter.' })
         } catch (e) {
-          if (!(e instanceof HookRefused)) throw e
-          ctx.run.blockedCommit = toBlocked(e, out.commitTitle, [], [])
-          ctx.log({ t: 'error', text: e.message })
+          if (e instanceof HookRefused) {
+            ctx.run.blockedCommit = toBlocked(e, out.commitTitle, [], [])
+            ctx.log({ t: 'error', text: e.message })
+          } else if (await committedNotPushed(cwd, d.worktree.branch)) {
+            // Commit fait, seul le push a échoué : les corrections sont acquises, il reste à pousser la branche.
+            ctx.log({ t: 'error', text: `Corrections commitées, mais le push a échoué : pousse la branche (onglet À jour). ${(e as Error).message}` })
+          } else throw e
         }
       }
       const blocked = !!ctx.run.blockedCommit

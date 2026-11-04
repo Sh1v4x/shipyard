@@ -182,6 +182,18 @@ function FindingsBasket({ findings, decisions, decide, fixAll }: { findings: Fin
       </div>
       <RunPanel id={fixAll.id} events={fixAll.events} running={fixAll.running} run={fixAll.run} label="Un agent corrige les remarques acceptées, puis commit et push" onStop={fixAll.stop} action={fixAll} />
       <BlockedCommit run={fixAll.run} />
+      {/* À trier : ni acceptées ni ignorées, elles comptent encore dans l'étape Self-review. */}
+      {pending.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-amber-500/40">
+          <p className="border-b border-amber-500/30 bg-amber-500/5 px-4 py-2 text-sm font-medium">À trier · {pending.length}</p>
+          {pending.map((f) => row(f, (
+            <span className="flex gap-1">
+              <Button size="sm" variant="outline" onClick={() => decide(f.id, 'approved')}>Accepter</Button>
+              <Button size="sm" variant="ghost" onClick={() => decide(f.id, 'ignored')}>Ignorer</Button>
+            </span>
+          )))}
+        </div>
+      )}
       {approved.length > 0 && (
         <div className="overflow-hidden rounded-lg border">
           {approved.map((f) => row(f, !fixAll.busy && <Button size="sm" variant="ghost" onClick={() => decide(f.id, null)}>Retirer</Button>))}

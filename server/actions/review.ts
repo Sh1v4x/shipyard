@@ -226,15 +226,15 @@ export const reviewActions: WorktreeActions = {
         }
       }
       const blocked = !!ctx.run.blockedCommit
-      return {
-        url,
-        results: findings.map((f) => {
-          const it = out.items.find((i) => i.id === f.id)
-          const ok = it?.status === 'already' || (it?.status === 'fixed' && !blocked)
-          const detail = it?.status === 'fixed' && blocked ? 'Corrigé, mais commit refusé par un hook : solution à valider' : it?.summary ?? 'Non traité par l’agent'
-          return { id: f.id, ok, detail }
-        }),
-      }
+      const results = findings.map((f) => {
+        const it = out.items.find((i) => i.id === f.id)
+        const ok = it?.status === 'already' || (it?.status === 'fixed' && !blocked)
+        const detail = it?.status === 'fixed' && blocked ? 'Corrigé, mais commit refusé par un hook : solution à valider' : it?.summary ?? 'Non traité par l’agent'
+        return { id: f.id, ok, detail }
+      })
+      // Le compteur suivait la liste de tâches de l'agent, qui n'en tient pas toujours une : il finit sur le résultat réel.
+      ctx.log({ t: 'progress', done: results.filter((x) => x.ok).length, total: findings.length, label: 'remarques corrigées', at: Date.now() })
+      return { url, results }
     })
   },
   'finding-fix': async ({ kind, input, d, scope, cwd }) => {

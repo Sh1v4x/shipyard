@@ -627,7 +627,12 @@ export async function createPullRequest(
     throw new HttpError(409, `Fichiers non commités restants : ${leftover.map((f) => f.path).join(', ')}. Ajoute-les à un commit ou régénère le plan.`)
   }
   await git.push(path, branch)
-  const url = await gh.createPr(path, { title: input.title, body: input.body, base: input.base || project.baseBranch, head: branch })
+  // PR déjà ouverte pour cette branche (premier essai abouti malgré une erreur affichée, double clic) : on la reprend.
+  const url = await gh.createPr(path, { title: input.title, body: input.body, base: input.base || project.baseBranch, head: branch }).catch((e: Error) => {
+    const existing = e.message.match(/already exists:\s*(https:\/\/\S+\/pull\/\d+)/)?.[1]
+    if (!existing) throw e
+    return existing
+  })
   // Label « CodeRabbit en cours » du dépôt, s'il en a un : la PR est créée même si sa pose échoue.
   const label = repoLabelsWithRole(labelRules(), 'aiReview', await gh.repoLabels(project.repo).catch(warnOn('gh.repoLabels', [])))[0] ?? null
   const num = Number(url.match(/\/pull\/(\d+)/)?.[1])

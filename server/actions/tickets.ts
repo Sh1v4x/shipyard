@@ -155,7 +155,7 @@ async function workAction({ kind, input, project, d, scope, cwd, vars }: Worktre
       'shots.dir': shotsDir,
       rules: rulesFor(project.id),
     }, {
-      id, kind, title: feedback ? 'Corrections' : kind === 'change' ? 'Modification libre' : d.ticket ? `Réaliser ${d.ticket.id}` : 'Tâche libre', scope: { ...scope, ref: planId ?? undefined }, cwd,
+      id, kind, title: feedback ? 'Corrections' : kind === 'change' ? 'Modification libre' : d.ticket ? `Réaliser ${d.ticket.id}` : d.worktree.localTicket ? `Réaliser « ${d.worktree.localTicket.title.slice(0, 60)} »` : 'Tâche libre', scope: { ...scope, ref: planId ?? undefined }, cwd,
       schema: schemas.ticketWorkSchema, addDirs: [shotsDir, ...linked.dirs], resume: feedback ? previous?.sessionId : null,
       mcpServers: playwright,
     }),

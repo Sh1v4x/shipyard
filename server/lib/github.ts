@@ -741,9 +741,21 @@ export async function jobAnnotations(repo: string, jobId: string): Promise<strin
   return (await runJson<{ message: string }[]>('gh', ['api', `repos/${repo}/check-runs/${jobId}/annotations`]).catch(() => [])).map((a) => a.message)
 }
 
-export async function rerun(repo: string, runId: string, jobId?: string) {
-  if (jobId) await gh(['run', 'rerun', '--repo', repo, '--job', jobId])
-  else await gh(['run', 'rerun', runId, '--repo', repo, '--failed'])
+/**
+ * Relance un run (ses jobs en échec) ou un seul job. Déjà relancé et en cours (l'état affiché avait un temps de retard) :
+ * rien à faire, ce n'est pas une erreur. Renvoie false dans ce cas.
+ */
+export async function rerun(repo: string, runId: string, jobId?: string): Promise<boolean> {
+  try {
+    if (jobId) await gh(['run', 'rerun', '--repo', repo, '--job', jobId])
+    else await gh(['run', 'rerun', runId, '--repo', repo, '--failed'])
+    return true
+  } catch (e) {
+    if (/already running|cannot be rerun/i.test((e as Error).message)) return false
+    throw e
+  } finally {
+    clearPrCache(repo)
+  }
 }
 
 export async function repoInfo(repo: string): Promise<{ defaultBranch: string; sshUrl: string }> {

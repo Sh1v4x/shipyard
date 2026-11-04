@@ -342,8 +342,8 @@ export function useSetFileViewed(project: string, wt: string) {
 export function useRerunCi(project: string, wt: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { runId: string; jobId?: string | null }) => api(`${wtPath(project, wt)}/ci/rerun`, { body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.worktree(project, wt) }),
+    mutationFn: (body: { runId: string; jobId?: string | null }) => api<{ alreadyRunning: boolean }>(`${wtPath(project, wt)}/ci/rerun`, { body }),
+    onSuccess: () => syncProject(qc, project, { wt }),
   })
 }
 

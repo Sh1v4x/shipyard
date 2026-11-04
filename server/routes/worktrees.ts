@@ -217,8 +217,8 @@ worktreesRoutes.post(`${wt}/rerequest`, async (c) => {
 
 worktreesRoutes.post(`${wt}/ci/rerun`, async (c) => {
   const b = await jsonBody(c, inputs.ciRerunInput)
-  await gh.rerun(getProject(c.req.param('id')).repo, b.runId, b.jobId)
-  return c.json({ ok: true })
+  const started = await gh.rerun(getProject(c.req.param('id')).repo, b.runId, b.jobId)
+  return c.json({ ok: true, alreadyRunning: !started })
 })
 
 worktreesRoutes.post(`${wt}/open`, async (c) => {

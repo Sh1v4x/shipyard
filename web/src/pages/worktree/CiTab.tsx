@@ -28,8 +28,9 @@ export function CiTab({ project, detail, wtId }: TabProps) {
 
   const rerunFailed = async () => {
     try {
-      for (const runId of new Set(failing.map((j) => j.runId).filter((x): x is string => !!x))) await rerun.mutateAsync({ runId })
-      toast('Jobs en échec relancés')
+      let already = 0
+      for (const runId of new Set(failing.map((j) => j.runId).filter((x): x is string => !!x))) if ((await rerun.mutateAsync({ runId })).alreadyRunning) already++
+      toast(already ? 'Déjà relancés et en cours sur GitHub : l’état se met à jour' : 'Jobs en échec relancés')
     } catch (e) {
       toast((e as Error).message, true)
     }
@@ -159,7 +160,7 @@ function JobRow({ job, project, wtId, mine }: { job: CiJob; project: string; wtI
                   <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(`CI « ${job.name} » : ${d.cause}\nCorrection : ${d.fix}`).then(() => toast('Diagnostic copié pour la review'))}>Copier pour la review</Button>
                 )}
                 {job.runId && (
-                  <Button variant="outline" size="sm" disabled={rerun.isPending} onClick={() => rerun.mutate({ runId: job.runId!, jobId: job.jobId }, { onSuccess: () => toast(`${job.name} relancé`), onError: (e) => toast(e.message, true) })}>
+                  <Button variant="outline" size="sm" disabled={rerun.isPending} onClick={() => rerun.mutate({ runId: job.runId!, jobId: job.jobId }, { onSuccess: (r) => toast(r.alreadyRunning ? `${job.name} est déjà en cours sur GitHub` : `${job.name} relancé`), onError: (e) => toast(e.message, true) })}>
                     Relancer le job
                   </Button>
                 )}

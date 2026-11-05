@@ -1,5 +1,5 @@
 import type { Project, ProjectOverview } from '../shared/types.ts'
-import { labelWithRole, needsChanges, needsRerequest, needsTesting } from '../shared/review.ts'
+import { labelWithRole, needsChanges, needsRerequest } from '../shared/review.ts'
 import { loadProjects } from './lib/config.ts'
 import { ensureNotifierApp, macNotify } from './lib/macNotify.ts'
 import { getSettings, labelRules } from './lib/settings.ts'
@@ -37,7 +37,6 @@ function tasksOf(p: Project, ov: ProjectOverview): Task[] {
     if (pr.unresolvedThreads) add(`comments#${n}`, pr.unresolvedThreads, `${pr.unresolvedThreads} commentaire(s) à traiter · #${n}`, pr.title, prHref(n, 'comments', 'mypr'))
     if (pr.ci.failing) add(`ci#${n}`, pr.ci.failing, `CI en échec · #${n}`, `${pr.ci.failing} job(s) : ${pr.title}`, prHref(n, 'ci', 'ci'))
     if (pr.conflicts) add(`conflict#${n}`, 1, `Conflits avec ${pr.base} · #${n}`, pr.title, prHref(n, 'conflicts', 'mypr'))
-    if (needsTesting(pr, rules)) add(`testing#${n}`, 1, `PR à tester · #${n}`, pr.title, prHref(n, 'tests', 'mypr'))
     if (needsChanges(pr, rules)) add(`changes#${n}`, 1, `Modifications demandées · #${n}`, `Label « ${labelWithRole(rules, 'changes', pr.labels)?.name ?? 'à corriger'} » sans commentaire : ${pr.title}`, prHref(n, 'ticket', 'mypr'))
     if (needsRerequest(pr, rules)) add(`rerequest#${n}`, 1, `Review à relancer · #${n}`, pr.title, prHref(n, 'comments', 'mypr'))
   }

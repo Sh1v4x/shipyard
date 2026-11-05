@@ -7,7 +7,7 @@ import type { LabelRole, LabelRules } from './types.ts'
 export const LABEL_ROLES: { role: LabelRole; title: string; help: string; source: 'GitHub' | 'Linear'; match: 'exact' | 'contains' }[] = [
   { role: 'awaitingReview', title: 'Review demandée', source: 'GitHub', match: 'exact', help: 'Sur la PR d’un autre : la compte dans « reviews à faire », même si GitHub ne me la redemande pas. Posé sur ma PR quand je relance la review (le premier présent dans le dépôt), retiré quand je rends ma review.' },
   { role: 'changes', title: 'À corriger', source: 'GitHub', match: 'exact', help: 'Sur ma PR : « modifications demandées », et les reviewers qui ont seulement commenté sont à relancer. Posé quand je demande des changements, retiré quand je relance la review ou que j’approuve.' },
-  { role: 'testing', title: 'À tester', source: 'GitHub', match: 'exact', help: 'Sur ma PR : elle apparaît dans « PR à tester » et déclenche une notification.' },
+  { role: 'testing', title: 'À tester', source: 'GitHub', match: 'exact', help: 'Sur ma PR : elle apparaît dans « À tester », à part de mes tâches, sans notification.' },
   { role: 'inProgress', title: 'Review en cours', source: 'GitHub', match: 'exact', help: 'Retiré automatiquement quand je rends ma review.' },
   { role: 'approved', title: 'Approuvée', source: 'GitHub', match: 'exact', help: 'Posé quand j’approuve une PR (le premier présent dans le dépôt).' },
   { role: 'aiReview', title: 'CodeRabbit en cours', source: 'GitHub', match: 'exact', help: 'Posé sur ma PR à sa création (le premier présent dans le dépôt) : CodeRabbit la relit.' },

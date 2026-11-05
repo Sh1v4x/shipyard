@@ -206,7 +206,7 @@ export interface TodoCounts {
  * Groupe de la file d'attente. me : m'attend (seul groupe compté, partout) ; start : ticket à démarrer ;
  * progress : branche en cours sans PR ; others : attend quelqu'un d'autre ou la CI ; clean : à ranger.
  */
-export type QueueGroup = 'me' | 'start' | 'progress' | 'others' | 'clean' | 'ghost'
+export type QueueGroup = 'me' | 'testing' | 'start' | 'progress' | 'others' | 'clean' | 'ghost'
 
 /**
  * PR ou worktree mis de côté, statut propre à Shipyard (rien n'est changé sur GitHub) : il sort de « À toi », des

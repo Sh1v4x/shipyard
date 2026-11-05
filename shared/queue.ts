@@ -9,6 +9,7 @@ import { plural } from './text.ts'
 
 export const QUEUE_GROUPS: { key: QueueGroup; label: string }[] = [
   { key: 'me', label: 'À toi' },
+  { key: 'testing', label: 'À tester' },
   { key: 'start', label: 'À démarrer' },
   { key: 'progress', label: 'En cours · sans PR' },
   { key: 'others', label: 'Attend les autres' },
@@ -30,7 +31,6 @@ function myPrReasons(pr: PullRequest, rules: LabelRules, solo: boolean): (Reason
   if (pr.unresolvedThreads) out.push({ label: plural(pr.unresolvedThreads, 'commentaire', 'commentaires'), tone: 'amber', tab: 'comments', action: 'Traiter' })
   if (pr.ci.failing) out.push({ label: plural(pr.ci.failing, 'job CI en échec', 'jobs CI en échec'), tone: 'red', tab: 'ci', action: 'Corriger la CI' })
   if (needsChanges(pr, rules)) out.push({ label: `Label « ${labelWithRole(rules, 'changes', pr.labels)?.name} » sans commentaire`, tone: 'amber', tab: 'ticket', action: 'Corriger' })
-  if (needsTesting(pr, rules)) out.push({ label: 'À tester', tone: 'purple', tab: 'tests', action: 'Tester' })
   if (!pr.unresolvedThreads && !pr.ci.failing) {
     const who = reviewersToRerequest(pr, rules)
     if (who.length) out.push({ label: `${who.join(', ')} à relancer`, tone: 'amber', tab: 'reviewers', action: 'Relancer' })
@@ -58,6 +58,10 @@ export function buildQueue(ov: Omit<ProjectOverview, 'queue' | 'ghosts'>, rules:
       const reasons = myPrReasons(pr, rules, ov.solo)
       if (reasons.length) {
         return { ...base, group: 'me', tone: worst(reasons), reasons: reasons.map(({ label, tone }) => ({ label, tone })), detail: [size(pr), wait && `${wait.label} · ${since(wait.since)}`].filter(Boolean).join(' · '), action: w ? { label: reasons[0].action, tab: reasons[0].tab } : null }
+      }
+      // « Ready for testing » : à part, ni compté dans mes tâches ni notifié.
+      if (needsTesting(pr, rules)) {
+        return { ...base, group: 'testing', tone: 'purple', reasons: [{ label: 'À tester', tone: 'purple' }], detail: [size(pr), wait && `${wait.label} · ${since(wait.since)}`].filter(Boolean).join(' · '), action: w ? { label: 'Tester', tab: 'tests' } : null }
       }
       const reasonsWaiting: Reason[] = []
       if (pr.isDraft) reasonsWaiting.push({ label: 'Brouillon', tone: 'gray' })

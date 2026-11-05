@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Run, InsightsMode, TicketDraftOutput, TicketPlanOutput, TicketWorkOutput } from '../../shared/types.ts'
+import type { BranchAskOutput, Run, InsightsMode, TicketDraftOutput, TicketPlanOutput, TicketWorkOutput } from '../../shared/types.ts'
 import { HttpError, loadProjects } from '../lib/config.ts'
 import { getRun, listRuns, setRunDecision, startRun } from '../lib/claude.ts'
 import { run } from '../lib/exec.ts'
@@ -162,11 +162,44 @@ async function workAction({ kind, input, project, d, scope, cwd, vars }: Worktre
   )
 }
 
+/** Ce que l'agent doit faire, selon la façon d'amener la demande. */
+const ASK_KIND: Record<string, string> = {
+  question: 'A question about the work done on this branch (what it does, why, how, what it covers). Answer from the code and the commits: precise, verified, with the files that prove it. Point out anything the question assumes that the code contradicts.',
+  research: 'A research to refine the work: compare options, look for what exists in the codebase or the libraries already in use, weigh trade-offs, check an assumption. Conclude with a recommendation, and turn what it implies into follow-ups.',
+}
+
+/** Question ou recherche sur la branche, sans modification : la réponse s'affiche sous la demande, avec des suites à lancer. */
+async function askAction({ kind, input, project, d, scope, cwd, vars }: WorktreeAction): Promise<Run> {
+  const request = input.extra?.trim()
+  if (!request) throw new HttpError(400, 'Écris ta question ou ce qu’il faut chercher')
+  const askKind = input.action === 'research' ? 'research' : 'question'
+  const prev = input.previousRunId ? getRun(input.previousRunId) : null
+  const prevOut = prev?.structured as BranchAskOutput | null
+  const linked = await linkedContext(d, 'plan')
+  return startRun(
+    specFrom('branch-ask', {
+      ...vars,
+      kind: ASK_KIND[askKind],
+      consigne: request,
+      context: await branchContext(d),
+      previous: prev && prevOut ? `## Previous exchange (the user follows up on it)\n\nRequest: ${prev.request ?? ''}\n\nAnswer: ${prevOut.summary}\n${prevOut.sections.map((x) => `### ${x.title}\n${x.body}`).join('\n')}` : '',
+      linked: linked.text,
+      rules: rulesFor(project.id),
+    }, {
+      kind, title: askKind === 'research' ? 'Recherche' : 'Question', scope: { ...scope, ref: askKind }, cwd, schema: schemas.branchAskSchema, request,
+      addDirs: linked.dirs,
+      // Suite d'un échange : l'agent reprend sa session, il a déjà lu le code.
+      resume: prev?.sessionId ?? null,
+    }),
+  )
+}
+
 export const ticketsActions: WorktreeActions = {
   'ticket-plan': planAction,
   'change-plan': planAction,
   ticket: workAction,
   change: workAction,
+  'branch-ask': askAction,
 }
 
 export const ticketsProjectActions: ProjectActions = {

@@ -10,7 +10,7 @@ import { Empty, Pill, RunLog, Spinner, ago } from '../../ui.tsx'
 import type { TabProps } from '../Worktree.tsx'
 
 const KIND: Partial<Record<ActionKind, string>> = {
-  'ticket-plan': 'Plan', ticket: 'Travail', 'change-plan': 'Plan (modif. libre)', change: 'Modification libre',
+  'ticket-plan': 'Plan', ticket: 'Travail', 'change-plan': 'Plan (modif. libre)', change: 'Modification libre', 'branch-ask': 'Question / recherche',
   'pr-prepare': 'Préparation de PR', 'self-review': 'Auto-review', 'self-review-part': 'Auto-review (lot)', 'finding-fix': 'Correctif (auto-review)',
   'comments-analyze': 'Analyse des commentaires', 'comment-fix': 'Correctif (commentaire)', 'general-fix': 'Commentaire général appliqué', 'comments-fix-all': 'Tout accepter', 'comment-reply': 'Réponse rédigée',
   review: 'Review', 'review-part': 'Review (lot)', test: 'Test', 'test-part': 'Test (un dépôt)', 'ci-analyze': 'Diagnostic CI', 'ci-fix': 'Correctif CI',

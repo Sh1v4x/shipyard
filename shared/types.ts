@@ -658,6 +658,7 @@ export type ActionKind =
   | 'ticket-plan'
   | 'ticket'
   | 'change-plan'
+  | 'branch-ask'
   | 'change'
   | 'pr-prepare'
   | 'self-review'
@@ -901,6 +902,18 @@ export interface TicketPlanOutput {
   questions: string[]
   /** Réponse au dernier message de l'utilisateur sur le plan (null pour un premier plan). */
   reply?: string | null
+}
+
+/** Question ou recherche sur le travail d'une branche (onglet Ticket › Modification libre), sans rien modifier. */
+export interface BranchAskOutput {
+  /** La réponse en bref, 1 à 3 phrases. */
+  summary: string
+  /** Le détail, par partie : un titre court et un corps en Markdown (listes, code, chemins de fichiers). */
+  sections: { title: string; body: string }[]
+  /** Fichiers lus qui fondent la réponse. */
+  files: string[]
+  /** Modifications que la réponse suggère, prêtes à lancer comme modification libre. */
+  followUps: { title: string; request: string }[]
 }
 
 export interface TicketWorkOutput {

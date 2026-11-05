@@ -4,7 +4,7 @@ import type { ActionKind, RunScope } from './types.ts'
 // et à la liste des agents en cours.
 
 const WORKTREE_TAB: Partial<Record<ActionKind, string>> = {
-  'ticket-plan': 'ticket', ticket: 'ticket', 'change-plan': 'ticket', change: 'ticket',
+  'ticket-plan': 'ticket', ticket: 'ticket', 'change-plan': 'ticket', change: 'ticket', 'branch-ask': 'ticket',
   'commit-plan': 'ticket', 'commit-exec': 'ticket', 'commit-fix': 'ticket', 'pr-prepare': 'ticket', 'pr-video': 'ticket',
   review: 'review', 'self-review': 'files', 'finding-fix': 'files', 'findings-fix-all': 'files',
   'comments-analyze': 'comments', 'comment-fix': 'comments', 'general-fix': 'comments', 'comments-fix-all': 'comments', 'comment-reply': 'comments', 'followup-check': 'followup',

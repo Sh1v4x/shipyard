@@ -545,6 +545,17 @@ export const ticketPlanSchema = {
   required: ['summary', 'steps', 'screenshots', 'risks', 'questions'],
 } as const
 
+export const branchAskSchema = {
+  type: 'object',
+  properties: {
+    summary: s('The answer in short, 1 to 3 sentences'),
+    sections: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, body: s('Markdown: lists, code, file paths') }, required: ['title', 'body'] } },
+    files: { type: 'array', items: { type: 'string' } },
+    followUps: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, request: s('The change to make, worded as a request to an agent') }, required: ['title', 'request'] } },
+  },
+  required: ['summary', 'sections', 'files', 'followUps'],
+} as const
+
 export const ticketWorkSchema = {
   type: 'object',
   properties: {

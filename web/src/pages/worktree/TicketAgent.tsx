@@ -1,17 +1,26 @@
-import { CheckIcon, WrenchIcon, ChevronRightIcon, CircleHelpIcon, FlaskConicalIcon, PlayIcon, PlusIcon, Trash2Icon, Undo2Icon } from 'lucide-react'
+import { CheckIcon, WrenchIcon, ChevronRightIcon, CircleHelpIcon, FlaskConicalIcon, MessageCircleQuestionIcon, PlayIcon, PlusIcon, SearchIcon, Trash2Icon, Undo2Icon } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label as FieldLabel } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import type { Run, TicketPlanOutput, TicketWorkOutput } from '../../../../shared/types.ts'
+import type { BranchAskOutput, Run, TicketPlanOutput, TicketWorkOutput } from '../../../../shared/types.ts'
 import { useAbandonAgent, useRunDecision } from '../../data/mutations.ts'
 import { useAction } from '../../data/runs.ts'
-import { Badge, PromptMenu, RunPanel, SectionLabel, Spinner, plural, useToast } from '../../ui.tsx'
+import { Badge, Pill, PromptMenu, RunPanel, SectionLabel, Spinner, plural, useToast } from '../../ui.tsx'
+import { Markdown } from '../../components/Markdown.tsx'
 import type { TabProps } from '../Worktree.tsx'
 
 const CHECK = { pass: ['OK', 'green'], fail: ['Échec', 'red'], skip: ['Non fait', 'gray'] } as const
+
+/** Modification libre : trois façons d'amener la chose. Modifier passe par un plan ; les deux autres ne touchent à rien. */
+const WAYS = [
+  { key: 'change', label: 'Modifier', icon: WrenchIcon, help: 'Une modification hors ticket et hors commentaire : l’IA part des commits et du diff de la branche pour l’intégrer au travail existant.' },
+  { key: 'question', label: 'Poser une question', icon: MessageCircleQuestionIcon, help: 'Sur ce qui a été développé : ce que ça fait, pourquoi, ce qui est couvert. L’IA répond d’après le code, sans rien modifier.' },
+  { key: 'research', label: 'Lancer une recherche', icon: SearchIcon, help: 'Pour peaufiner : comparer des options, vérifier une hypothèse, chercher ce qui existe déjà. L’IA conclut par une recommandation et des suites à lancer.' },
+] as const
+type Way = (typeof WAYS)[number]['key']
 
 const MODES = {
   ticket: { plan: 'ticket-plan', work: 'ticket', title: 'Faire travailler l’IA' },
@@ -37,6 +46,7 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
   const work = useAction<TicketWorkOutput>(m.work, scope)
   const [extra, setExtra] = useState('')
   const [planFeedback, setPlanFeedback] = useState('')
+  const [way, setWay] = useState<Way>('change')
   // « Nouveau plan » : réaffiche la consigne pour repartir d'une demande neuve (session neuve), plan en cours ou non.
   const [restart, setRestart] = useState(false)
 
@@ -102,7 +112,7 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="font-semibold">{m.title}</h2>
-          {mode === 'change' && <p className="mt-0.5 text-sm text-muted-foreground">Une modification hors ticket et hors commentaire : l’IA part des commits et du diff de la branche pour l’intégrer au travail existant.</p>}
+          {mode === 'change' && <p className="mt-0.5 text-sm text-muted-foreground">{WAYS.find((x) => x.key === way)!.help}</p>}
         </div>
         <span className="flex flex-wrap items-center gap-1">
           {canRestart && <Button variant="outline" size="sm" onClick={() => setRestart(true)}><PlusIcon />Nouveau plan</Button>}
@@ -115,79 +125,164 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
           <PromptMenu items={[[mode === 'change' ? 'change' : ticket ? 'ticket' : 'free', 'Travail']]} />
         </span>
       </div>
-      <Steps phase={workIsCurrent ? (decided ? 4 : work.result ? 3 : 2) : plan.result ? 1 : 0} />
-
-      {/* ---------- 0. Consigne et demande de plan ---------- */}
-      {(!plan.id || decided || restart || planDropped) && !plan.busy && !workRunning && !(directWork && !restart) && (
-        <div className="flex flex-col gap-3">
-          {abandoned && (
-            <Alert>
-              <Undo2Icon />
-              <AlertDescription>Démarche abandonnée : agents arrêtés et modifications de l’IA annulées. Repars d’une nouvelle consigne.</AlertDescription>
-            </Alert>
-          )}
-          {decided && !abandoned && (
-            <Alert variant={work.run!.decision === 'approved' ? 'success' : 'default'}>
-              {work.run!.decision === 'approved' ? <CheckIcon /> : <Undo2Icon />}
-              <AlertDescription>
-                {work.run!.decision === 'approved' ? 'Travail approuvé : relis les fichiers puis commite avec la carte Commiter.' : 'Travail refusé.'} Les captures ont été supprimées.
-              </AlertDescription>
-            </Alert>
-          )}
-          <div className="flex flex-col gap-2">
-            <FieldLabel htmlFor={`${mode}-extra`}>{ticket ? 'Consigne en plus' : mode === 'change' ? 'Modification à faire' : 'Consigne'} {ticket && <span className="font-normal text-muted-foreground">(facultatif)</span>}</FieldLabel>
-            <Textarea id={`${mode}-extra`} rows={3} value={extra} onChange={(e) => setExtra(e.target.value)}
-              placeholder={ticket ? 'Ex. réutilise le composant Badge, n’ajoute pas de dépendance…' : mode === 'change' ? 'Ex. : afficher aussi la date de relance dans la carte, renommer le champ en `notifiedAt`, gérer le cas où la liste est vide…' : 'Décris ce que l’IA doit faire dans ce worktree.'} />
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button size="sm" disabled={(!ticket && !extra.trim()) || plan.busy} onClick={() => startPlan()}>
-              <PlayIcon />{decided || restart || planDropped ? 'Nouveau plan' : 'Proposer un plan'}
-            </Button>
-            {/* Ticket (Linear ou local) sans plan encore : l'IA peut développer tout de suite, le ticket tient lieu de plan. */}
-            {ticket && !plan.id && (
-              <Button size="sm" variant="outline" disabled={work.busy} onClick={() => void work.start({ extra: extra.trim() || DEVELOP_TICKET })} title="Sans plan à valider : l’IA lit le ticket et développe. Rien n’est commité avant ton accord.">
-                {work.busy ? <Spinner /> : <WrenchIcon />}Développer directement
-              </Button>
-            )}
-            {restart && <Button size="sm" variant="ghost" onClick={() => setRestart(false)}>Revenir au plan actuel</Button>}
-            <span className="text-sm text-muted-foreground">{restart ? 'Le plan actuel sera remplacé par un plan neuf, à partir de cette consigne.' : ticket && !plan.id ? 'Avec un plan, rien n’est modifié tant que tu ne l’as pas approuvé. Directement, rien n’est commité avant ton accord.' : 'Rien n’est modifié tant que tu n’as pas approuvé le plan.'}</span>
-          </div>
+      {mode === 'change' && (
+        <div className="flex flex-wrap gap-2">
+          {WAYS.map((x) => <Pill key={x.key} active={x.key === way} onClick={() => setWay(x.key)}><x.icon className="size-3.5" />{x.label}</Pill>)}
         </div>
       )}
-
-      {/* ---------- 1. Plan ---------- */}
-      {restart || planDropped ? null : !workIsCurrent || plan.busy ? (
+      {mode === 'change' && way !== 'change' ? (
+        <AskPanel project={project.id} wtId={wtId} way={way} onChange={(request) => { setExtra(request); setWay('change'); setRestart(!!plan.id) }} />
+      ) : (
         <>
-          <RunPanel id={plan.id} events={plan.events} running={plan.running} run={plan.run} label="Claude explore le code et prépare le plan" onStop={plan.stop} action={sinceFresh(plan)} />
-          {plan.result && !plan.busy && (
-            <PlanView
-              id={mode}
-              plan={plan.result}
-              note={plan.run?.note ?? null}
-              feedback={planFeedback}
-              setFeedback={setPlanFeedback}
-              busy={work.busy}
-              onRevise={() => { void startPlan(planFeedback); setPlanFeedback('') }}
-              onApprove={() => work.start({ planRunId: plan.id, extra })}
-            />
-          )}
-        </>
-      ) : null}
+        <Steps phase={workIsCurrent ? (decided ? 4 : work.result ? 3 : 2) : plan.result ? 1 : 0} />
 
-      {/* ---------- 2 et 3. Travail, avant / après, audit ---------- */}
-      {workIsCurrent && !plan.busy && !decided && !restart && (
-        <>
-          <RunPanel id={work.id} events={work.events} running={work.running} run={work.run} label="L’IA travaille (captures avant, code, captures après)" defaultOpen onStop={work.stop} action={sinceFresh(work)} />
-          {work.result && work.run && <WorkResult project={project.id} run={work.run} result={work.result} planRunId={plan.id} restartable={!!plan.id || !!workExtra} onRestart={(fb) => work.start({ planRunId: plan.id ?? undefined, extra: workExtra, feedback: fb, resumeFrom: work.id ?? undefined })} onRetest={() => work.start({ planRunId: plan.id ?? undefined, extra: workExtra, retest: true, resumeFrom: work.id ?? undefined })} />}
-          {work.failed && work.run?.status !== 'success' && (
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => work.start({ planRunId: plan.id, extra })}>Relancer le travail</Button>
-              <Button size="sm" variant="ghost" onClick={() => startPlan()}>Revenir au plan</Button>
+        {/* ---------- 0. Consigne et demande de plan ---------- */}
+        {(!plan.id || decided || restart || planDropped) && !plan.busy && !workRunning && !(directWork && !restart) && (
+          <div className="flex flex-col gap-3">
+            {abandoned && (
+              <Alert>
+                <Undo2Icon />
+                <AlertDescription>Démarche abandonnée : agents arrêtés et modifications de l’IA annulées. Repars d’une nouvelle consigne.</AlertDescription>
+              </Alert>
+            )}
+            {decided && !abandoned && (
+              <Alert variant={work.run!.decision === 'approved' ? 'success' : 'default'}>
+                {work.run!.decision === 'approved' ? <CheckIcon /> : <Undo2Icon />}
+                <AlertDescription>
+                  {work.run!.decision === 'approved' ? 'Travail approuvé : relis les fichiers puis commite avec la carte Commiter.' : 'Travail refusé.'} Les captures ont été supprimées.
+                </AlertDescription>
+              </Alert>
+            )}
+            <div className="flex flex-col gap-2">
+              <FieldLabel htmlFor={`${mode}-extra`}>{ticket ? 'Consigne en plus' : mode === 'change' ? 'Modification à faire' : 'Consigne'} {ticket && <span className="font-normal text-muted-foreground">(facultatif)</span>}</FieldLabel>
+              <Textarea id={`${mode}-extra`} rows={3} value={extra} onChange={(e) => setExtra(e.target.value)}
+                placeholder={ticket ? 'Ex. réutilise le composant Badge, n’ajoute pas de dépendance…' : mode === 'change' ? 'Ex. : afficher aussi la date de relance dans la carte, renommer le champ en `notifiedAt`, gérer le cas où la liste est vide…' : 'Décris ce que l’IA doit faire dans ce worktree.'} />
             </div>
-          )}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button size="sm" disabled={(!ticket && !extra.trim()) || plan.busy} onClick={() => startPlan()}>
+                <PlayIcon />{decided || restart || planDropped ? 'Nouveau plan' : 'Proposer un plan'}
+              </Button>
+              {/* Ticket (Linear ou local) sans plan encore : l'IA peut développer tout de suite, le ticket tient lieu de plan. */}
+              {ticket && !plan.id && (
+                <Button size="sm" variant="outline" disabled={work.busy} onClick={() => void work.start({ extra: extra.trim() || DEVELOP_TICKET })} title="Sans plan à valider : l’IA lit le ticket et développe. Rien n’est commité avant ton accord.">
+                  {work.busy ? <Spinner /> : <WrenchIcon />}Développer directement
+                </Button>
+              )}
+              {restart && <Button size="sm" variant="ghost" onClick={() => setRestart(false)}>Revenir au plan actuel</Button>}
+              <span className="text-sm text-muted-foreground">{restart ? 'Le plan actuel sera remplacé par un plan neuf, à partir de cette consigne.' : ticket && !plan.id ? 'Avec un plan, rien n’est modifié tant que tu ne l’as pas approuvé. Directement, rien n’est commité avant ton accord.' : 'Rien n’est modifié tant que tu n’as pas approuvé le plan.'}</span>
+            </div>
+          </div>
+        )}
+
+        {/* ---------- 1. Plan ---------- */}
+        {restart || planDropped ? null : !workIsCurrent || plan.busy ? (
+          <>
+            <RunPanel id={plan.id} events={plan.events} running={plan.running} run={plan.run} label="Claude explore le code et prépare le plan" onStop={plan.stop} action={sinceFresh(plan)} />
+            {plan.result && !plan.busy && (
+              <PlanView
+                id={mode}
+                plan={plan.result}
+                note={plan.run?.note ?? null}
+                feedback={planFeedback}
+                setFeedback={setPlanFeedback}
+                busy={work.busy}
+                onRevise={() => { void startPlan(planFeedback); setPlanFeedback('') }}
+                onApprove={() => work.start({ planRunId: plan.id, extra })}
+              />
+            )}
+          </>
+        ) : null}
+
+        {/* ---------- 2 et 3. Travail, avant / après, audit ---------- */}
+        {workIsCurrent && !plan.busy && !decided && !restart && (
+          <>
+            <RunPanel id={work.id} events={work.events} running={work.running} run={work.run} label="L’IA travaille (captures avant, code, captures après)" defaultOpen onStop={work.stop} action={sinceFresh(work)} />
+            {work.result && work.run && <WorkResult project={project.id} run={work.run} result={work.result} planRunId={plan.id} restartable={!!plan.id || !!workExtra} onRestart={(fb) => work.start({ planRunId: plan.id ?? undefined, extra: workExtra, feedback: fb, resumeFrom: work.id ?? undefined })} onRetest={() => work.start({ planRunId: plan.id ?? undefined, extra: workExtra, retest: true, resumeFrom: work.id ?? undefined })} />}
+            {work.failed && work.run?.status !== 'success' && (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => work.start({ planRunId: plan.id, extra })}>Relancer le travail</Button>
+                <Button size="sm" variant="ghost" onClick={() => startPlan()}>Revenir au plan</Button>
+              </div>
+            )}
+          </>
+        )}
         </>
       )}
     </article>
+  )
+}
+
+/**
+ * Question ou recherche sur la branche : la demande, puis la réponse mise en forme (résumé, parties, fichiers lus)
+ * et les suites proposées, chacune lançable comme modification. « Préciser » poursuit l'échange dans la même session.
+ */
+function AskPanel({ project, wtId, way, onChange }: { project: string; wtId: string; way: Exclude<Way, 'change'>; onChange: (request: string) => void }) {
+  const ask = useAction<BranchAskOutput>('branch-ask', { project, worktree: wtId, ref: way })
+  const [text, setText] = useState('')
+  const [followUp, setFollowUp] = useState('')
+  const research = way === 'research'
+  const r = ask.result
+  const send = async (request: string, previousRunId?: string) => {
+    if (!request.trim()) return
+    const id = await ask.start({ extra: request.trim(), action: way, previousRunId })
+    if (id) {
+      setText('')
+      setFollowUp('')
+    }
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
+        <FieldLabel htmlFor={`ask-${way}`}>{research ? 'Ce qu’il faut chercher' : 'Ta question'}</FieldLabel>
+        <Textarea id={`ask-${way}`} rows={3} value={text} onChange={(e) => setText(e.target.value)}
+          placeholder={research ? 'Ex. : y a-t-il mieux que le polling pour rafraîchir la liste ? compare avec ce que fait déjà le projet…' : 'Ex. : comment le cas d’une facture sans client est-il géré ? pourquoi avoir ajouté ce hook ?'} />
+        <div className="flex flex-wrap items-center gap-3">
+          <Button size="sm" disabled={!text.trim() || ask.busy} onClick={() => void send(text)}>
+            {ask.busy ? <Spinner /> : research ? <SearchIcon /> : <MessageCircleQuestionIcon />}{research ? 'Lancer la recherche' : 'Poser la question'}
+          </Button>
+          <PromptMenu items={[['branch-ask', research ? 'Recherche' : 'Question']]} />
+          <span className="text-sm text-muted-foreground">Rien n’est modifié : l’IA lit le code et répond.</span>
+        </div>
+      </div>
+      <RunPanel id={ask.id} events={ask.events} running={ask.running} run={ask.run} label={research ? 'L’IA cherche dans le code' : 'L’IA lit le code pour répondre'} onStop={ask.stop} action={ask} />
+      {r && !ask.busy && (
+        <div className="flex flex-col gap-4 border-t border-dashed pt-4">
+          {ask.run?.request && (
+            <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
+              <SectionLabel>{research ? 'Recherche' : 'Question'}</SectionLabel>
+              <p className="whitespace-pre-line">{ask.run.request}</p>
+            </div>
+          )}
+          <Markdown text={r.summary} className="text-[15px] leading-relaxed font-medium" />
+          {r.sections.map((sec) => (
+            <section key={sec.title} className="flex flex-col gap-1.5">
+              <SectionLabel>{sec.title}</SectionLabel>
+              <Markdown text={sec.body} className="text-sm leading-relaxed" />
+            </section>
+          ))}
+          {r.files.length > 0 && <p className="font-mono text-xs break-all text-muted-foreground">{r.files.join(' · ')}</p>}
+          {r.followUps.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <SectionLabel>Suites proposées</SectionLabel>
+              {r.followUps.map((f) => (
+                <div key={f.title} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2">
+                  <div className="min-w-0 flex-1 text-sm">
+                    <p className="font-medium">{f.title}</p>
+                    <p className="text-muted-foreground">{f.request}</p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => onChange(f.request)}><WrenchIcon />En faire une modification</Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-col gap-2">
+            <FieldLabel htmlFor={`ask-more-${way}`}>Préciser <span className="font-normal text-muted-foreground">(l’IA reprend avec tout le contexte)</span></FieldLabel>
+            <Textarea id={`ask-more-${way}`} rows={2} value={followUp} onChange={(e) => setFollowUp(e.target.value)} placeholder="Ex. : et dans le cas où l’utilisateur n’a pas de société ?" />
+            <div><Button size="sm" variant="outline" disabled={!followUp.trim() || ask.busy} onClick={() => void send(followUp, ask.id ?? undefined)}>Continuer l’échange</Button></div>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

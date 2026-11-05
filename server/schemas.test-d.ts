@@ -33,6 +33,7 @@ describe('schémas des sorties structurées', () => {
     expectTypeOf<Aligned<typeof S.commitFixSchema, T.CommitFixOutput>>().toEqualTypeOf<true>()
     expectTypeOf<Aligned<typeof S.hookFixPlanSchema, T.HookFixPlanOutput>>().toEqualTypeOf<true>()
     expectTypeOf<Aligned<typeof S.ticketPlanSchema, T.TicketPlanOutput>>().toEqualTypeOf<true>()
+    expectTypeOf<Aligned<typeof S.branchAskSchema, T.BranchAskOutput>>().toEqualTypeOf<true>()
     expectTypeOf<Aligned<typeof S.ticketWorkSchema, T.TicketWorkOutput>>().toEqualTypeOf<true>()
     expectTypeOf<Aligned<typeof S.testCheckSchema, T.TestCheckOutput>>().toEqualTypeOf<true>()
   })

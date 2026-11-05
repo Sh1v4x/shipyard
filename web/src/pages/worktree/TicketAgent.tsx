@@ -1,5 +1,5 @@
 import { CheckIcon, WrenchIcon, ChevronRightIcon, CircleHelpIcon, FlaskConicalIcon, MessageCircleQuestionIcon, PlayIcon, PlusIcon, SearchIcon, Trash2Icon, Undo2Icon } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label as FieldLabel } from '@/components/ui/label'
@@ -131,7 +131,12 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
         </div>
       )}
       {mode === 'change' && way !== 'change' ? (
-        <AskPanel project={project.id} wtId={wtId} way={way} onChange={(request) => { setExtra(request); setWay('change'); setRestart(!!plan.id) }} />
+        <AskPanel project={project.id} wtId={wtId} way={way} onChange={(request) => { setExtra(request); setWay('change'); setRestart(!!plan.id) }}
+          onApplyAll={(requests) => {
+            // Un seul agent pour toutes les suites approuvées, sans plan : la liste fait office de plan. Suivi dans « Modifier ».
+            void work.start({ extra: `Apply these changes, one after the other:\n\n${requests.map((r, i) => `${i + 1}. ${r}`).join('\n\n')}` })
+            setWay('change')
+          }} />
       ) : (
         <>
         <Steps phase={workIsCurrent ? (decided ? 4 : work.result ? 3 : 2) : plan.result ? 1 : 0} />
@@ -216,10 +221,24 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
  * Question ou recherche sur la branche : la demande, puis la réponse mise en forme (résumé, parties, fichiers lus)
  * et les suites proposées, chacune lançable comme modification. « Préciser » poursuit l'échange dans la même session.
  */
-function AskPanel({ project, wtId, way, onChange }: { project: string; wtId: string; way: Exclude<Way, 'change'>; onChange: (request: string) => void }) {
+function AskPanel({ project, wtId, way, onChange, onApplyAll }: { project: string; wtId: string; way: Exclude<Way, 'change'>; onChange: (request: string) => void; onApplyAll: (requests: string[]) => void }) {
   const ask = useAction<BranchAskOutput>('branch-ask', { project, worktree: wtId, ref: way })
   const [text, setText] = useState('')
   const [followUp, setFollowUp] = useState('')
+  // Tri des suites proposées (approuvée, ignorée), gardé dans ce navigateur pour cette réponse.
+  const decisionsKey = `devpanel:ask-decisions:${ask.id ?? 'none'}`
+  const [decisions, setDecisions] = useState<Record<string, 'approved' | 'ignored'>>({})
+  useEffect(() => {
+    try { setDecisions(JSON.parse(localStorage.getItem(decisionsKey) ?? '{}')) } catch { setDecisions({}) }
+  }, [decisionsKey])
+  const decide = (title: string, choice: 'approved' | 'ignored' | null) => {
+    const { [title]: _old, ...rest } = decisions
+    const next = choice ? { ...rest, [title]: choice } : rest
+    setDecisions(next)
+    try { localStorage.setItem(decisionsKey, JSON.stringify(next)) } catch { /* stockage indisponible */ }
+  }
+  const approved = (ask.result?.followUps ?? []).filter((f) => decisions[f.title] === 'approved')
+  const pending = (ask.result?.followUps ?? []).filter((f) => !decisions[f.title])
   const research = way === 'research'
   const r = ask.result
   const send = async (request: string, previousRunId?: string) => {
@@ -263,16 +282,32 @@ function AskPanel({ project, wtId, way, onChange }: { project: string; wtId: str
           {r.files.length > 0 && <p className="font-mono text-xs break-all text-muted-foreground">{r.files.join(' · ')}</p>}
           {r.followUps.length > 0 && (
             <div className="flex flex-col gap-2">
-              <SectionLabel>Suites proposées</SectionLabel>
-              {r.followUps.map((f) => (
-                <div key={f.title} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2">
-                  <div className="min-w-0 flex-1 text-sm">
-                    <p className="font-medium">{f.title}</p>
-                    <p className="text-muted-foreground">{f.request}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <SectionLabel className="mb-0">Suites proposées · {plural(approved.length, 'approuvée', 'approuvées')} · {pending.length} à trier</SectionLabel>
+                <Button size="sm" disabled={!approved.length} onClick={() => onApplyAll(approved.map((f) => f.request))} title="Un seul agent applique toutes les suites approuvées, sans plan à valider. Rien n’est commité avant ton accord.">
+                  <WrenchIcon />{approved.length ? `Lancer un agent sur ${approved.length === 1 ? 'la modification approuvée' : `les ${approved.length} modifications approuvées`}` : 'Approuve des suites pour lancer un agent'}
+                </Button>
+              </div>
+              {r.followUps.map((f) => {
+                const d = decisions[f.title]
+                return (
+                  <div key={f.title} className={cn('flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2', d === 'approved' && 'border-emerald-500/40', d === 'ignored' && 'opacity-60')}>
+                    <div className="min-w-0 flex-1 text-sm">
+                      <p className="flex flex-wrap items-center gap-2 font-medium">{f.title}{d && <Badge tone={d === 'approved' ? 'green' : 'gray'}>{d === 'approved' ? 'Approuvée' : 'Ignorée'}</Badge>}</p>
+                      <p className="text-muted-foreground">{f.request}</p>
+                    </div>
+                    <span className="flex flex-wrap gap-1">
+                      {d ? <Button size="sm" variant="ghost" onClick={() => decide(f.title, null)}>Changer</Button> : (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => decide(f.title, 'approved')}><CheckIcon />Approuver</Button>
+                          <Button size="sm" variant="ghost" onClick={() => decide(f.title, 'ignored')}>Ignorer</Button>
+                        </>
+                      )}
+                      <Button size="sm" variant="ghost" title="Préparer cette seule modification, avec un plan à valider" onClick={() => onChange(f.request)}>Seule, avec un plan</Button>
+                    </span>
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => onChange(f.request)}><WrenchIcon />En faire une modification</Button>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
           <div className="flex flex-col gap-2">

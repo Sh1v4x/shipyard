@@ -253,7 +253,7 @@ export function RunLog({ events, max = 400 }: { events: RunEvent[]; max?: number
   }
   return (
     <div className="relative">
-      <div ref={box} onScroll={onScroll} className="max-h-[360px] overflow-auto rounded-lg bg-terminal px-4 py-3 font-mono text-xs leading-relaxed text-terminal-foreground" aria-live="polite">
+      <div ref={box} onScroll={onScroll} className="max-h-[360px] overflow-y-auto rounded-lg bg-terminal px-4 py-3 font-mono text-xs leading-relaxed [overflow-wrap:anywhere] text-terminal-foreground" aria-live="polite">
         {shown.map((e, i) => {
           const sub = 'sub' in e && e.sub ? <span className="text-sky-300">[{e.sub}] </span> : null
           if (e.t === 'tool') return <div key={i}>{sub}<span className="text-amber-300">› {e.name}</span> <span className="text-zinc-400">{e.summary}</span></div>

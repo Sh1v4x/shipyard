@@ -475,10 +475,12 @@ export function WorkResult({ project, run, result, planRunId, restartable = !!pl
           </div>
           <div className="flex flex-col gap-1.5">
             {result.checks.map((c, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge tone={CHECK[c.status][1]}>{CHECK[c.status][0]}</Badge>
-                <strong className="font-medium">{c.name}</strong>
-                <span className="min-w-0 flex-1 text-muted-foreground">{c.detail}</span>
+              <div key={i} className="flex min-w-0 flex-col gap-0.5 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={CHECK[c.status][1]}>{CHECK[c.status][0]}</Badge>
+                  <strong className="min-w-0 font-medium break-words">{c.name}</strong>
+                </div>
+                <p className="min-w-0 text-muted-foreground break-words">{c.detail}</p>
               </div>
             ))}
           </div>

@@ -16,6 +16,7 @@ Rules:
 - Read the files before modifying them. Minimal fix for each cause, only what makes the jobs pass.
 - Several jobs with the same cause: a single fix.
 - Never disable a test, a lint rule or a CI step to make it pass.
+- A job that needs a database (migrations, integration tests) is reproduced with what the repository already provides (its docker-compose service, its test global setup or the Postgres already running on the workstation), never with a container started from a script of your own. Any command that can hang (container, install, long test) runs in the foreground with a time limit (`timeout 300 …`); if it exceeds it, stop it and move on: say in summary what could not be checked.
 - Reproduce each check locally when possible (lint, typecheck, targeted test, .env check script), and fix what still breaks.
 - Don't commit or push: Shipyard makes a single commit, then CI reruns.
 

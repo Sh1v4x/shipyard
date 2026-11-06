@@ -327,8 +327,9 @@ export async function discardExcluded(d: WorktreeDetail): Promise<string[]> {
   const dropped: string[] = []
   for (const t of [{ path: d.worktree.path, files: d.dirtyFiles }, ...(d.linked ?? []).map((l) => ({ path: l.path, files: l.dirtyFiles }))]) {
     if (!t.files.some((f) => neverCommitted(f.path))) continue
-    dropped.push(...(await discardExcludedIn(t.path)))
-    t.files.splice(0, t.files.length, ...t.files.filter((f) => !neverCommitted(f.path)))
+    const gone = await discardExcludedIn(t.path)
+    dropped.push(...gone)
+    t.files.splice(0, t.files.length, ...t.files.filter((f) => !gone.includes(f.path)))
   }
   return dropped
 }

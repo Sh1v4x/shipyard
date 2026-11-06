@@ -83,6 +83,7 @@ export const commitsActions: WorktreeActions = {
       ...(d.linked ?? []).filter((l) => l.dirtyFiles.length),
     ].filter((t) => t.dirtyFiles.length)
     if (!targets.length) throw new HttpError(400, 'Rien à commiter')
+    // Après discardExcluded, un fichier de la liste encore modifié l'est pour de vrai : il se commite comme les autres.
     const exclude = loadPrompt('commit-plan').exclude
     const sections = await Promise.all(targets.map(async (t) => {
       const [stat, recent] = await Promise.all([
@@ -91,7 +92,7 @@ export const commitsActions: WorktreeActions = {
       ])
       return [
         targets.length > 1 ? `## Project \`${t.project}\` (${t.name}): ${t.path}, branch ${t.branch ?? 'detached'}` : '',
-        `Changed files:\n${t.dirtyFiles.map((f) => `- [${f.status}] ${f.path}${exclude.includes(basename(f.path)) ? '  ← to exclude' : ''}`).join('\n')}`,
+        `Changed files:\n${t.dirtyFiles.map((f) => `- [${f.status}] ${f.path}${exclude.includes(basename(f.path)) ? '  ← in the exclude list, but with a real change: commit it with the work that needs it' : ''}`).join('\n')}`,
         stat && `Diff (stat):\n${stat}`,
         `Latest commits of the repository (format to imitate):\n${recent.trim()}`,
         commitRule(t.path),
@@ -124,12 +125,12 @@ export const commitsActions: WorktreeActions = {
       if (!t.branch) throw new HttpError(400, `Worktree sans branche (${t.name})`)
     }
     const multi = new Set(commits.map((c) => c.project ?? project.id)).size > 1
-    const exclude = loadPrompt('commit-plan').exclude
     return startJob({ kind, title: `Commiter et pousser ${commits.length} commit(s)`, scope }, async (ctx): Promise<CommitExecOutput> => {
       const results: CommitExecResult[] = []
       for (const c of commits) {
         const { cwd, branch, name } = targetOf(c)!
-        const files = c.files.filter((f) => !exclude.includes(basename(f)))
+        // Les fichiers de la liste `exclude` dont le changement n'est que de la forme ont déjà été annulés : ce qui reste se commite.
+        const files = c.files
         const r: CommitExecResult = { title: c.title, files, ...(c.project && c.project !== project.id ? { project: c.project } : {}), status: 'failed', sha: null, attempts: 0, fixes: [], error: null }
         results.push(r)
         if (ctx.cancelled()) {

@@ -121,6 +121,12 @@ export async function dirtyFiles(cwd: string): Promise<{ status: string; path: s
     .map((l) => ({ status: l.slice(0, 2).trim() || '?', path: l.slice(3) }))
 }
 
+/** Fichier suivi dont la modification ne touche qu'aux espaces et lignes vides (reformatage par un hook). */
+export async function isWhitespaceOnlyChange(cwd: string, f: { status: string; path: string }): Promise<boolean> {
+  if (f.status === '?' || f.status === '??') return false
+  return git(cwd, ['diff', '--quiet', 'HEAD', '--ignore-all-space', '--ignore-blank-lines', '--', f.path]).then(() => true, () => false)
+}
+
 /** Annule les modifications non commitées de ces fichiers (suivis : restaurés ; nouveaux : supprimés). */
 export async function discardFiles(cwd: string, files: { status: string; path: string }[]) {
   const tracked = files.filter((f) => f.status !== '?' && f.status !== '??').map((f) => f.path)

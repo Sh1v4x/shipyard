@@ -6,6 +6,7 @@ import { CommandError, run } from '../lib/exec.ts'
 import * as git from '../lib/git.ts'
 import * as gh from '../lib/github.ts'
 import type { LinkedWorktree } from '../services.ts'
+import { discardExcludedIn } from '../lib/excluded.ts'
 
 /** Sortie complète d'un hook git en échec (lefthook écrit sur stdout et stderr). */
 export function hookOutput(e: unknown): string {
@@ -70,6 +71,7 @@ export async function commitRepos(repos: CommitRepo[], title: string): Promise<s
   for (const [i, r] of repos.entries()) {
     let sha: string | null
     try {
+      await discardExcludedIn(r.path)
       sha = await git.commitFiles(r.path, title, 'all')
     } catch (e) {
       throw new HookRefused(hookOutput(e), repos.slice(i), urls)

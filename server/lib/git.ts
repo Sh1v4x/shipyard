@@ -121,6 +121,14 @@ export async function dirtyFiles(cwd: string): Promise<{ status: string; path: s
     .map((l) => ({ status: l.slice(0, 2).trim() || '?', path: l.slice(3) }))
 }
 
+/** Annule les modifications non commitées de ces fichiers (suivis : restaurés ; nouveaux : supprimés). */
+export async function discardFiles(cwd: string, files: { status: string; path: string }[]) {
+  const tracked = files.filter((f) => f.status !== '?' && f.status !== '??').map((f) => f.path)
+  const untracked = files.filter((f) => f.status === '?' || f.status === '??').map((f) => f.path)
+  if (tracked.length) await git(cwd, ['restore', '--staged', '--worktree', '--', ...tracked])
+  for (const f of untracked) rmSync(join(cwd, f), { force: true })
+}
+
 export async function commitsAhead(cwd: string, base: string): Promise<string[]> {
   const out = await git(cwd, ['log', '--format=%s', `origin/${base}..HEAD`]).catch(() => '')
   return out.split('\n').filter(Boolean)

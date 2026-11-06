@@ -10,9 +10,10 @@ import * as git from '../lib/git.ts'
 import * as gh from '../lib/github.ts'
 import { loadPrompt } from '../lib/prompts.ts'
 import * as schemas from '../schemas.ts'
-import { type WorktreeActions, assertNoMerge, specFrom } from './context.ts'
+import { type WorktreeActions, assertNoMerge, specFrom, discardExcluded } from './context.ts'
 import { commitRule, hookOutput } from './commitFlow.ts'
 import { manualTest } from '../lib/progress.ts'
+import { discardExcludedIn } from '../lib/excluded.ts'
 
 const PR_TEMPLATES = ['.github/pull_request_template.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/pull_request_template.md', 'pull_request_template.md']
 
@@ -74,6 +75,8 @@ export const commitsActions: WorktreeActions = {
   },
   'commit-plan': async ({ kind, project, d, scope, cwd, vars }) => {
     assertNoMerge(d, 'préparer des commits')
+    // Les fichiers à ne jamais commiter sont annulés d'emblée : le plan ne les voit pas.
+    await discardExcluded(d)
     // Ce worktree et ses worktrees liés (projets du groupe) : un seul plan, chaque commit dans son dépôt.
     const targets = [
       { project: project.id, name: project.name, path: cwd, branch: d.worktree.branch, dirtyFiles: d.dirtyFiles },
@@ -108,6 +111,7 @@ export const commitsActions: WorktreeActions = {
     const commits = input.commits ?? []
     if (!commits.length) throw new HttpError(400, 'Aucun commit à créer')
     assertNoMerge(d, 'commiter')
+    await discardExcluded(d)
     // Chaque commit se fait dans son worktree : celui-ci, ou un worktree lié (projet du groupe).
     const targets = new Map([
       [project.id, { cwd, branch: d.worktree.branch, repo: project.repo, name: project.name }],
@@ -182,6 +186,9 @@ export const commitsActions: WorktreeActions = {
       }
       for (const t of targets.values()) {
         gh.clearPrCache(t.repo)
+        // Régénérés par les hooks pendant le commit (schema.prisma…) : annulés, ils ne restent pas en suspens.
+        const dropped = await discardExcludedIn(t.cwd).catch(() => [])
+        if (dropped.length) ctx.log({ t: 'info', text: `${targets.size > 1 ? `${t.name} : ` : ''}annulé, jamais commité : ${dropped.join(', ')}` })
         const left = await git.dirtyFiles(t.cwd).catch(() => [])
         if (left.length) ctx.log({ t: 'info', text: `${targets.size > 1 ? `${t.name} : ` : ''}${left.length} fichier(s) restent non commités : ${left.map((f) => f.path).join(', ')}` })
       }

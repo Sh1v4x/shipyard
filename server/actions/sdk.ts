@@ -11,7 +11,7 @@ async function sdkPackageAction({ kind, input, d, scope, cwd }: WorktreeAction):
   // source puis le mettre à jour. Le commit poussé relance la CI.
   const st = (await sdkStatus(cwd, true)).find((s) => s.name === input.sdk)
   if (!st) throw new HttpError(404, `Paquet ${input.sdk ?? '?'} introuvable dans les dépendances`)
-  assertClean(d, `mettre à jour ${st.name}`)
+  await assertClean(d, `mettre à jour ${st.name}`)
   if (kind === 'sdk-update') {
     if (!st.latest) throw new HttpError(409, `Aucune version publiée de ${st.name} n’est accessible`)
     if (st.locked === st.latest) throw new HttpError(409, `${st.name} est déjà en ${st.latest}`)

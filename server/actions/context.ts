@@ -11,6 +11,7 @@ import { rulesFor } from '../lib/rules.ts'
 import { linkedWorktrees, type LinkedWorktree, localTicketMarkdown, localTicketType } from '../services.ts'
 import { androidAvds, platformOf, type Platform } from '../lib/platform.ts'
 import { warnOn } from '../lib/log.ts'
+import { discardExcludedIn, neverCommitted } from '../lib/excluded.ts'
 
 export const DIFFS_DIR = join(DATA_DIR, 'diffs')
 
@@ -312,9 +313,24 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
  * Le worktree doit être propre avant une action qui commite. Une fusion de la base en cours (fichiers de la base
  * en attente du commit de fusion) se signale comme telle : ce ne sont pas mes modifications.
  */
-export function assertClean(d: WorktreeDetail, what: string) {
+export async function assertClean(d: WorktreeDetail, what: string) {
   assertNoMerge(d, what)
+  await discardExcluded(d)
   if (d.dirtyFiles.length) throw new HttpError(409, `${d.dirtyFiles.length} fichier(s) non commité(s) : commite-les ou annule-les avant de ${what}`)
+}
+
+/**
+ * Annule les modifications non commitées des fichiers à ne jamais commiter (voir lib/excluded.ts), dans le worktree
+ * et ses liés : ils ne doivent bloquer ni un commit, ni une fusion, ni une PR. Les retire du détail, renvoie leurs chemins.
+ */
+export async function discardExcluded(d: WorktreeDetail): Promise<string[]> {
+  const dropped: string[] = []
+  for (const t of [{ path: d.worktree.path, files: d.dirtyFiles }, ...(d.linked ?? []).map((l) => ({ path: l.path, files: l.dirtyFiles }))]) {
+    if (!t.files.some((f) => neverCommitted(f.path))) continue
+    dropped.push(...(await discardExcludedIn(t.path)))
+    t.files.splice(0, t.files.length, ...t.files.filter((f) => !neverCommitted(f.path)))
+  }
+  return dropped
 }
 
 /** Fusion de la base en cours : ses fichiers ne sont pas mon travail, ils partent dans le commit de fusion (onglet Conflits). */

@@ -17,6 +17,7 @@ import { clearSdkCache } from './lib/sdk.ts'
 import { allLocalTickets, localTicketOf, moveLocalTicket, orphanLocalTickets, removeLocalTicket, saveLocalTicket } from './lib/localTickets.ts'
 import { warnOn } from './lib/log.ts'
 import { selfReviewSummary, testsSummary } from './lib/progress.ts'
+import { discardExcludedIn } from './lib/excluded.ts'
 
 // ---------- Projets ----------
 
@@ -627,6 +628,7 @@ export async function createPullRequest(
     const sha = await git.commitFiles(path, c.title, c.files)
     if (sha) done.push(`${sha.slice(0, 7)} ${c.title}`)
   }
+  await discardExcludedIn(path)
   const leftover = await git.dirtyFiles(path)
   if (leftover.length && input.commits.length) {
     throw new HttpError(409, `Fichiers non commités restants : ${leftover.map((f) => f.path).join(', ')}. Ajoute-les à un commit ou régénère le plan.`)

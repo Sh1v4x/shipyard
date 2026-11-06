@@ -82,7 +82,7 @@ export const conflictsActions: WorktreeActions = {
     const feedback = input.feedback?.trim()
     let merge = d.merge
     if (!merge) {
-      assertClean(d, `fusionner ${base}`)
+      await assertClean(d, `fusionner ${base}`)
       merge = await git.startMerge(cwd, base)
       if (!merge && d.worktree.branch) {
         // À jour avec la base en local : la branche distante a peut-être avancé (PR empilée mergée dedans), ou la fusion n'est pas poussée.
@@ -133,7 +133,7 @@ export const conflictsActions: WorktreeActions = {
     if (!d.worktree.branch) throw new HttpError(400, 'Worktree sans branche')
     // Une fusion de cette même base restée en cours (passage précédent refusé par un hook) est reprise.
     const resume = d.merge && (d.merge.base ?? base) === base ? d.merge : null
-    if (!resume) assertClean(d, `récupérer ${base}`)
+    if (!resume) await assertClean(d, `récupérer ${base}`)
     return startJob({ kind, title: `Récupérer ${base}`, scope: { ...scope, ref: 'base-sync' } }, async (ctx): Promise<BaseSyncOutput> => {
       ctx.log({ t: 'info', text: resume ? `Reprise de la fusion de ${base} en cours…` : `Récupération et fusion de origin/${base}…` })
       const merge = resume ?? await git.startMerge(cwd, base)
@@ -168,7 +168,7 @@ export const conflictsActions: WorktreeActions = {
     const branch = d.worktree.branch
     if (!branch) throw new HttpError(400, 'Worktree sans branche')
     const resume = d.merge && d.merge.base === branch ? d.merge : null
-    if (!resume) assertClean(d, `récupérer origin/${branch}`)
+    if (!resume) await assertClean(d, `récupérer origin/${branch}`)
     return startJob({ kind, title: `Récupérer origin/${branch}`, scope: { ...scope, ref: 'branch-sync' } }, async (ctx): Promise<BaseSyncOutput> => {
       if (!resume) {
         ctx.log({ t: 'info', text: `Récupération de origin/${branch}…` })

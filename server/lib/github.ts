@@ -83,8 +83,23 @@ function duration(a?: string, b?: string): string | null {
   return s >= 60 ? `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s` : `${s} s`
 }
 
+/**
+ * Un même job peut apparaître plusieurs fois sur le même commit (deux déclenchements du workflow, une relance) :
+ * comme GitHub sur la page de la PR, seule la dernière exécution de chaque nom compte.
+ */
+export function latestPerName(items: RollupItem[]): RollupItem[] {
+  const byName = new Map<string, RollupItem>()
+  const at = (i: RollupItem) => (i.startedAt && !i.startedAt.startsWith('0001') ? Date.parse(i.startedAt) : 0)
+  for (const i of items) {
+    const key = `${i.workflowName ?? ''}/${i.name ?? i.context ?? 'check'}`
+    const prev = byName.get(key)
+    if (!prev || at(i) >= at(prev)) byName.set(key, i)
+  }
+  return [...byName.values()]
+}
+
 export function ciFromRollup(items: RollupItem[] | null | undefined): CiSummary {
-  const jobs: CiJob[] = (items ?? []).map((i, idx) => {
+  const jobs: CiJob[] = latestPerName(items ?? []).map((i, idx) => {
     const url = i.detailsUrl ?? i.targetUrl ?? null
     const m = url?.match(/actions\/runs\/(\d+)\/job\/(\d+)/)
     return {

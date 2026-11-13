@@ -1,4 +1,4 @@
-import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, ClockIcon, CodeIcon, CopyIcon, EllipsisIcon, GhostIcon, GitMergeIcon, PinIcon, PinOffIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react'
+import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, ClockIcon, CodeIcon, CopyIcon, EllipsisIcon, GhostIcon, GitMergeIcon, PencilLineIcon, PinIcon, PinOffIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
 import { LinkTicket } from '../components/LinkTicket.tsx'
 import { LabelPicker } from '../components/LabelPicker.tsx'
@@ -7,7 +7,7 @@ import { MoveWorktree } from '../components/MoveWorktree.tsx'
 import { TicketStatus } from '../components/TicketStatus.tsx'
 import { PrTimeline } from '../components/PrTimeline.tsx'
 import type { Project, PullRequest, Worktree } from '../../../shared/types.ts'
-import { useFinishWorktree, useOpenInEditor, useRemoveWorktree, useRerequestReview, useSetGhost, useWakeGhost } from '../data/mutations.ts'
+import { useFinishWorktree, useMarkPrDraft, useMarkPrReady, useOpenInEditor, useRemoveWorktree, useRerequestReview, useSetGhost, useWakeGhost } from '../data/mutations.ts'
 import { usePins } from '../data/pins.ts'
 import { useChecks, useHealth, useLabelRules, useProjectOverview, useReviewerCandidates, useSdkStatus, useThreads, useWorktreeDetail } from '../data/queries.ts'
 import { awaitsReview, labelWithRole, needsChanges, needsReviewer, needsTesting } from '../../../shared/review.ts'
@@ -24,6 +24,7 @@ import { LogsTab } from './worktree/LogsTab.tsx'
 import { CommentsTab } from './worktree/CommentsTab.tsx'
 import { ConflictsTab } from './worktree/ConflictsTab.tsx'
 import { FilesTab } from './worktree/FilesTab.tsx'
+import { ReviewSyncTab } from './worktree/ReviewSyncTab.tsx'
 import { FollowupTab } from './worktree/FollowupTab.tsx'
 import { type PrState, type Section, StateDot, buildSections, lateSdks, myOpenThreads, testsDone } from './worktree/checklist.tsx'
 import { ReviewTab } from './worktree/ReviewTab.tsx'
@@ -45,6 +46,7 @@ const NEXT_TONE: Record<NextStep['tone'], string> = {
 export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: string; tab?: string }) {
   const q = useWorktreeDetail(project.id, wtId)
   const open = useOpenInEditor(project.id, wtId)
+  const toDraft = useMarkPrDraft(project.id, wtId)
   const toast = useToast()
   const rules = useLabelRules()
   const pins = usePins()
@@ -117,6 +119,13 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
               <Badge tone={pr.mine ? 'blue' : 'purple'}>{pr.mine ? 'Ma PR' : `Review · ${pr.author}`}</Badge>
               {ghost && <span title={ghost.note ?? "Mis de côté"}><Badge tone="gray"><GhostIcon className="size-3" />Ghost</Badge></span>}
               {pr.isDraft && <Badge tone="gray">draft</Badge>}
+              {pr.isDraft && pr.mine && <MarkReady project={project.id} wtId={wtId} />}
+              {!pr.isDraft && pr.mine && !w.merged && (
+                <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={toDraft.isPending} title="La PR n’est plus à relire tant que tu ne l’as pas remise prête"
+                  onClick={() => toDraft.mutate(undefined, { onSuccess: () => toast('PR repassée en draft'), onError: (e) => toast(e.message, true) })}>
+                  {toDraft.isPending ? <Spinner /> : <PencilLineIcon />}Passer en draft
+                </Button>
+              )}
               <span aria-hidden>·</span>
             </>
           )}
@@ -156,7 +165,7 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
           {status.length > 0 && (
             <div className="overflow-hidden rounded-xl border bg-card">
               <div className="flex items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground">
-                <span>{review ? 'Ma review' : 'Prête à merger'}</span>
+                <span>{review ? 'Ma review' : pr ? 'Prête à merger' : 'Avant la PR'}</span>
                 <span className="tabular-nums">{ok} / {status.length}</span>
               </div>
               <div className="h-1 bg-muted"><div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${(ok / status.length) * 100}%` }} /></div>
@@ -181,10 +190,22 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
           {!partial && active === 'sdk' && <SdkPanel {...ctx} />}
           {!partial && active === 'logs' && <LogsTab {...ctx} />}
           {!partial && active === 'reviewers' && pr && <ReviewersBar project={project} wtId={wtId} pr={pr} />}
-          {!partial && active === 'conflicts' && <ConflictsTab {...ctx} />}
+          {!partial && active === 'conflicts' && (w.kind === 'review' ? <ReviewSyncTab {...ctx} /> : <ConflictsTab {...ctx} />)}
         </div>
       </div>
     </div>
+  )
+}
+
+/** Ma PR en draft : la passer en « prête pour review » sans aller sur GitHub. */
+function MarkReady({ project, wtId }: { project: string; wtId: string }) {
+  const ready = useMarkPrReady(project, wtId)
+  const toast = useToast()
+  return (
+    <Button size="sm" variant="outline" className="h-6 px-2 text-xs" disabled={ready.isPending}
+      onClick={() => ready.mutate(undefined, { onSuccess: (r) => toast(`PR prête pour review${r.label ? ` · label « ${r.label} » posé` : ''}`), onError: (e) => toast(e.message, true) })}>
+      {ready.isPending && <Spinner />}Prête pour review
+    </Button>
   )
 }
 
@@ -208,6 +229,7 @@ function SectionButton({ s, active, onClick }: { s: Section; active: boolean; on
 function nextStep({ d, threads, checks, sdk, rules, me }: PrState): NextStep {
   const { worktree: w, pr } = d
   if (pr && w.kind === 'review') {
+    if (d.behindRemote) return { tone: 'amber', title: `${plural(d.behindRemote, 'nouveau commit', 'nouveaux commits')} sur la PR${d.remoteAuthors.length ? ` par ${d.remoteAuthors.join(', ')}` : ''}`, detail: 'Ton worktree est resté sur l’ancienne version : récupère-les pour relire et tester le code à jour.', tab: 'conflicts', label: 'Récupérer la branche' }
     const replies = myOpenThreads(threads).filter((t) => !t.awaitingReviewer)
     if (replies.length && awaitsReview(pr, rules)) return { tone: 'purple', title: `${pr.author} a répondu à ${plural(replies.length, 'de tes retours', 'de tes retours')}`, detail: 'Vérifie les correctifs avant de relancer une review complète.', tab: 'followup', label: 'Vérifier les correctifs' }
     if (awaitsReview(pr, rules) || (me && pr.requestedReviewers.includes(me))) return { tone: 'purple', title: `Review demandée par ${pr.author}`, detail: `+${pr.additions} −${pr.deletions} · ${plural(pr.changedFiles, 'fichier', 'fichiers')}`, tab: 'review', label: 'Lancer la review' }
@@ -235,7 +257,7 @@ function nextStep({ d, threads, checks, sdk, rules, me }: PrState): NextStep {
     if (who.length) return { tone: 'amber', title: `Commentaires traités : relancer ${who.join(', ')}`, detail: null, tab: 'reviewers', label: 'Relancer la review' }
     if (!d.solo && needsReviewer(pr, rules)) return { tone: 'amber', title: 'Aucun reviewer sur la PR', detail: 'Personne ne la regarde tant que tu n’as pas demandé de review.', tab: 'reviewers', label: 'Demander une review' }
     if (needsTesting(pr, rules) && !testsDone(d.tests)) return { tone: 'purple', title: 'À tester avant de merger', detail: null, tab: 'tests', label: 'Tester' }
-    if (pr.isDraft) return { tone: 'gray', title: 'Brouillon', detail: 'Passe-la en « prête pour review » sur GitHub quand le travail est fini.', url: pr.url, label: 'Ouvrir sur GitHub' }
+    if (pr.isDraft) return { tone: 'gray', title: 'Brouillon', detail: 'Personne ne la relit pour l’instant. Clique « Prête pour review » en haut de la page quand le travail est fini.' }
     if (labelWithRole(rules, 'approved', pr.labels) || pr.reviewDecision === 'APPROVED') return { tone: 'green', title: pr.conflictsUnknown ? 'Approuvée : GitHub vérifie encore les conflits' : 'Prête à merger', detail: null, url: pr.url, label: 'Merger sur GitHub' }
     if (pr.ci.state === 'running') return { tone: 'blue', title: 'CI en cours', detail: null, tab: 'ci', label: 'Suivre la CI' }
     // Seul contributeur : personne à attendre, tout est vert.

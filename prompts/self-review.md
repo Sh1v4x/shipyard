@@ -2,12 +2,12 @@
 name: Auto-review de ma PR
 group: Ma PR
 when: Worktree › Fichiers › Analyser ma PR avec l’IA
-vars: [pr.number, pr.title, ticket.id, ticket.title, diff.path, rules, threads, context, lang.app]
+vars: [subject, ticket.id, ticket.title, diff.path, rules, threads, previous, context, lang.app]
 model: sonnet
 allowedTools: [Read, Grep, Glob, Agent, Bash(git diff *), Bash(git log *), Bash(git show *)]
 ---
 
-Review my PR #{pr.number} ({pr.title}) like a demanding reviewer, before my colleagues see it. Linked ticket: {ticket.id} ({ticket.title}).
+Review {subject} like a demanding reviewer, before my colleagues see it. Linked ticket: {ticket.id} ({ticket.title}).
 
 Your output is shown in Shipyard, at the right line of the diff; each finding can be fixed by an agent. You don't modify anything yourself.
 
@@ -35,7 +35,15 @@ The goal: the PR reaches my colleagues with nothing left for them to point out. 
    - simplification: dead code, impossible branch, code longer than necessary.
 4. Then check all added code against the dev rules, one by one, audit checklist included: every deviation is a finding, even a minor one. Pattern searches (Grep) are for spotting occurrences: verify each result in the code before turning it into a finding.
 
+Scope, hard rule: a finding is about code the PR wrote. It is placed on a line the diff adds (`+`), and its fix can be done by changing only lines the PR added or modified, in files of the diff. Code that exists on the base branch, and that the diff only shows as context or that lives in the same file, is not the PR's: do not report it, even when it breaks a rule. A fix that would change the signature or the behavior of existing code used by other features (shared hook, util, API route, schema) is out of scope: do not propose it. Findings placed outside the lines the PR wrote are discarded by Shipyard.
+
 Only report what the PR adds or modifies: the full file is there to understand the context. A problem in untouched existing code is not reported, unless the change triggers or worsens it. No false positives: check in the code that each problem is real. Don't report what Biome or tsc already catch.
+
+## Previous pass
+
+{previous}
+
+On a second pass, follow the instructions above first (verify the fixes, do not raise what was dismissed), then review the rest with the method. A finding that follows up on one of the previous pass carries its id in previousId; a new finding has previousId null.
 
 ## Comments already posted
 
@@ -60,6 +68,7 @@ Call StructuredOutput once, at the very end:
   - severity: `bloquant` (bug, vulnerability, data loss, unmet ticket requirement, rule marked "hard rule"), `important` (to fix before merge: edge case, design, rule not followed), `suggestion` (optional improvement);
   - title: one line;
   - body: the problem and its consequence, in 1 to 3 sentences;
+  - previousId: the id of the finding of the previous pass this one follows up on (not fixed, badly fixed, or wrongly declined), otherwise null;
   - fix: the concrete fix (a short snippet is allowed). The same problem repeated in several places: one finding per place, with the same title.
 
 Write all text fields of your output in {lang.app} (keep technical terms in English).

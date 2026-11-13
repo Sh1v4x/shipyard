@@ -15,13 +15,15 @@ const RISK = { aucun: 'green', faible: 'gray', 'à vérifier': 'amber' } as cons
 const CHECK = { pass: 'green', fail: 'red', skip: 'gray' } as const
 
 export function ConflictsTab({ project, detail, wtId }: TabProps) {
-  const pr = detail.pr!
+  // Sans PR, la branche se compare à la base du projet, et GitHub ne dit rien d'un conflit : il se voit à la fusion.
+  const prBase = detail.pr?.base ?? project.baseBranch
+  const conflicts = detail.pr?.conflicts ?? false
   const merge = detail.merge
-  const base = merge?.base ?? pr.base
+  const base = merge?.base ?? prBase
   const resolve = useResolveConflicts(project.id, wtId)
   // « Récupérer <base> » : fusion, conflits résolus par l'IA, SDK, commit et push, en une tâche suivie.
   const sync = useAction<BaseSyncOutput>('base-sync', { project: project.id, worktree: wtId, ref: 'base-sync' })
-  const canSync = (!merge || base === pr.base) && (detail.behindBase > 0 || !!merge || sync.busy)
+  const canSync = (!merge || base === prBase) && (detail.behindBase > 0 || !!merge || sync.busy)
   // Ma branche sur GitHub : des commits poussés par quelqu'un d'autre, à récupérer avant de continuer.
   const branch = detail.worktree.branch
   const pull = useAction<BaseSyncOutput>('branch-sync', { project: project.id, worktree: wtId, ref: 'branch-sync' })
@@ -90,7 +92,7 @@ export function ConflictsTab({ project, detail, wtId }: TabProps) {
                 {plural(merge.conflicted.length, 'fichier en conflit', 'fichiers en conflit')} · {merge.remaining.length ? `${merge.remaining.length} avec des conflits encore en place` : 'plus aucun marqueur de conflit'}
               </p>
             </>
-          ) : pr.conflicts ? (
+          ) : conflicts ? (
             <>
               <p className="font-semibold">La PR est en conflit avec <span className="font-mono text-[13px]">{base}</span></p>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -111,17 +113,17 @@ export function ConflictsTab({ project, detail, wtId }: TabProps) {
         <div className="flex flex-wrap items-center gap-2">
           <PromptMenu items={[['conflict-resolve', 'Résoudre les conflits']]} />
           {canSync && (
-            <Button size="sm" variant={pr.conflicts || merge ? 'outline' : 'default'} disabled={sync.busy || busy != null} onClick={() => void sync.start()}>
-              {sync.busy ? <Spinner /> : <GitPullRequestArrowIcon />}{merge ? `Reprendre la récupération de ${pr.base}` : `Récupérer ${pr.base}`}{!merge && detail.behindBase > 0 && ` · ${plural(detail.behindBase, 'commit', 'commits')}`}
+            <Button size="sm" variant={conflicts || merge ? 'outline' : 'default'} disabled={sync.busy || busy != null} onClick={() => void sync.start()}>
+              {sync.busy ? <Spinner /> : <GitPullRequestArrowIcon />}{merge ? `Reprendre la récupération de ${prBase}` : `Récupérer ${prBase}`}{!merge && detail.behindBase > 0 && ` · ${plural(detail.behindBase, 'commit', 'commits')}`}
             </Button>
           )}
           {/* Fusion déjà faite en local mais pas poussée (push refusé, interrompu…) : GitHub voit encore le conflit. */}
-          {!merge && pr.conflicts && (
+          {!merge && conflicts && (
             <Button size="sm" variant="outline" disabled={finish.busy || busy != null} onClick={() => finish.start()} title="Pousse les commits locaux ; si la branche distante a avancé, ses commits sont d’abord intégrés">
               {finish.busy && <Spinner />}Pousser la branche
             </Button>
           )}
-          {(merge || pr.conflicts) && (
+          {(merge || conflicts) && (
             <Button size="sm" disabled={resolve.busy || busy != null || (!merge && detail.dirtyFiles.length > 0)} onClick={() => resolve.start()}>
               {resolve.busy ? <Spinner /> : <PlayIcon />}{out ? 'Relancer l’analyse' : 'Résoudre avec l’IA'}
             </Button>
@@ -129,10 +131,10 @@ export function ConflictsTab({ project, detail, wtId }: TabProps) {
         </div>
       </Card>
 
-      {showSync && <RunPanel id={sync.id} events={sync.events} running={sync.running} run={sync.run} label={`Récupération de ${pr.base} : fusion, conflits, commit et push`} onStop={sync.stop} action={sync} />}
+      {showSync && <RunPanel id={sync.id} events={sync.events} running={sync.running} run={sync.run} label={`Récupération de ${prBase} : fusion, conflits, commit et push`} onStop={sync.stop} action={sync} />}
 
       {/* Fichiers non commités : la fusion ne peut pas démarrer. L'IA dit pour chacun s'il faut le garder ou l'annuler. */}
-      {!merge && pr.conflicts && detail.dirtyFiles.length > 0 && <DirtyTriage project={project.id} wtId={wtId} files={detail.dirtyFiles} onReady={() => resolve.start()} />}
+      {!merge && conflicts && detail.dirtyFiles.length > 0 && <DirtyTriage project={project.id} wtId={wtId} files={detail.dirtyFiles} onReady={() => resolve.start()} />}
 
       <RunPanel id={resolve.id} events={resolve.events} running={resolve.running} run={resolve.run} label="Résolution des conflits" onStop={resolve.stop} action={resolve} />
 

@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { FindingsFixAllAgentOutput, FindingsFixAllOutput, PrReviewOutput, ReviewOutput, ReviewThread, FixOutput } from '../../shared/types.ts'
+import type { FindingsFixAllAgentOutput, FindingsFixAllOutput, PrReviewOutput, ReviewOutput, ReviewThread, FixOutput, SelfReviewMergeOutput } from '../../shared/types.ts'
 import { HttpError } from '../lib/config.ts'
 import { getRun, listRuns, startJob, startRun, type JobContext, type RunSpec } from '../lib/claude.ts'
 import * as git from '../lib/git.ts'
@@ -8,8 +9,9 @@ import * as gh from '../lib/github.ts'
 import { rulesFor } from '../lib/rules.ts'
 import * as schemas from '../schemas.ts'
 import { HookRefused, blockOnRefusal, commitAndPush, toBlocked } from './commitFlow.ts'
-import { DIFFS_DIR, type WorktreeActions, linkedContext, pool, prContext, priorThreadsText, repoRules, specFrom, threadText } from './context.ts'
-import { type Lot, finishReview, finishSelfReview, isMonorepo, mergeReviews, mergeSelfReviews, splitIntoLots } from './reviewDiff.ts'
+import { DIFFS_DIR, type WorktreeActions, branchContext, linkedContext, localContext, pool, prContext, priorThreadsText, repoRules, specFrom, threadText } from './context.ts'
+import { type Lot, SEVERITY_RANK, diffLines, finishReview, finishSelfReview, isMonorepo, mergeReviews, mergeSelfReviews, splitIntoLots } from './reviewDiff.ts'
+import { earlierFixesText, lastPasses, passBefore, passOf, previousPassText, selfReviewDiffPath } from './selfReviewHistory.ts'
 import { warnOn } from '../lib/log.ts'
 import { reviewDecisionsPath } from '../lib/runArtifacts.ts'
 
@@ -19,11 +21,13 @@ import { reviewDecisionsPath } from '../lib/runArtifacts.ts'
  */
 async function reviewLots<T>(ctx: JobContext, opts: {
   repo: string
-  pr: number
+  /** Numéro de la PR, ou nom de la branche quand elle n'en a pas encore (nomme les fichiers de diff). */
+  pr: number | string
   lots: Lot[]
   skipped: string[]
   commits: string[]
-  note: string
+  /** Ajouté au contexte de chaque lot (peut dépendre du lot : ce que relisent les autres). */
+  note: string | ((lot: Lot, i: number) => string)
   child: (lot: Lot, i: number, vars: { context: string; 'diff.path': string }) => RunSpec
   count: (out: T) => number
 }): Promise<{ zone: string; out: T | null }[]> {
@@ -38,7 +42,7 @@ async function reviewLots<T>(ctx: JobContext, opts: {
       '## Batch',
       `The PR has ${totalFiles} files: it is reviewed in ${opts.lots.length} batches by reviewers in parallel. This batch (${i + 1}/${opts.lots.length}, "${l.name}") covers ${l.files} files and ${l.lines} diff lines, in ${lotPath}.`,
       'Only report on the files of this batch, but read anything else in the repository you need to understand them (callers, types, neighbouring components). This batch\'s diff is short enough to be read in full: read all of it.',
-      opts.note,
+      typeof opts.note === 'string' ? opts.note : opts.note(l, i),
     ].filter(Boolean).join('\n')
     const r = await ctx.runChild(opts.child(l, i, { context, 'diff.path': lotPath }))
     const out = r.structured as T | null
@@ -68,6 +72,23 @@ function dismissedFromLastReview(project: string, worktree: string): string {
     'I judged them irrelevant: do not raise them again, even reworded, unless the code changed at that spot and the problem has become real.',
     ...dismissed.map((c) => `- ${c.file}:${c.line}: ${c.body.replace(/\n/g, ' ').slice(0, 300)}`),
   ].join('\n')
+}
+
+/**
+ * Ce que l'agent de correction doit savoir de l'auto-review d'où viennent les remarques : son résumé, et celles que
+ * j'ai ignorées au tri (à ne pas appliquer au passage).
+ */
+function selfReviewNotes(runId: string | undefined): string {
+  const out = runId ? (getRun(runId)?.structured as ReviewOutput | null) : null
+  if (!out?.findings) return ''
+  const path = reviewDecisionsPath(runId!)
+  const ignored = existsSync(path) ? ((JSON.parse(readFileSync(path, 'utf8')) as { ignored?: string[] }).ignored ?? []) : []
+  const dismissed = out.findings.filter((f) => ignored.includes(f.id))
+  return [
+    '## The self-review these findings come from',
+    out.summary,
+    dismissed.length ? `Findings the user dismissed (they judged them wrong or not worth it): do not apply them, even in passing while fixing a neighbouring one.\n${dismissed.map((f) => `- ${f.file}:${f.line}: ${f.title}`).join('\n')}` : '',
+  ].filter(Boolean).join('\n\n')
 }
 
 async function reReviewContext(repo: string, num: number, threads: ReviewThread[], login: string): Promise<{ text: string; threadIds: Set<string> } | null> {
@@ -122,33 +143,89 @@ async function committedNotPushed(cwd: string, branch: string | null): Promise<b
 }
 
 export const reviewActions: WorktreeActions = {
-  'self-review': async ({ kind, project, scope, cwd, needPr, vars }) => {
-    const pr = needPr()
-    const [ctxd, threads, login] = await Promise.all([prContext(project.repo, pr.number, { cwd: project.path, base: pr.base }), gh.threads(project.repo, pr.number, true), gh.me()])
-    const selfVars = { ...vars, rules: rulesFor(project.id), threads: priorThreadsText(threads, login) }
+  'self-review': async ({ kind, input, project, d, scope, cwd, vars }) => {
+    // Sans PR, la relecture porte sur la branche face à origin/<base> : de quoi corriger avant d'ouvrir la PR.
+    const pr = d.pr
+    if (!pr && d.worktree.kind === 'review') throw new HttpError(400, 'Ce worktree n’a pas de PR')
+    const [ctxd, threads, login] = pr
+      ? await Promise.all([prContext(project.repo, pr.number, { cwd: project.path, base: pr.base }), gh.threads(project.repo, pr.number, true), gh.me()])
+      : [await localContext(d), [], '']
+    if (!ctxd.diff.trim()) throw new HttpError(409, `Rien à relire : la branche n’a aucun changement face à origin/${project.baseBranch}`)
+    const name = pr ? `#${pr.number}` : d.worktree.branch ?? 'la branche'
+    const selfVars = {
+      ...vars, rules: rulesFor(project.id), threads: pr ? priorThreadsText(threads, login) : 'None: the PR is not open yet.',
+      subject: pr ? `my PR #${pr.number} (${pr.title})` : `my branch ${d.worktree.branch ?? ''}, before I open its PR (changes compared with origin/${project.baseBranch})`,
+    }
     const spec = { schema: schemas.reviewSchema, addDirs: [DIFFS_DIR], cwd }
+    // Passe précédente : ce qu'elle a relevé et ce que l'agent de correction en a fait. La nouvelle passe vérifie et complète.
+    const [prevRun, ...olderRuns] = lastPasses(project.id, input.worktree!, 10)
+    const prev = prevRun ? passOf(prevRun) : null
+    // Après une première passe, la suivante est une vérification : elle suit les corrections et ne relève de nouveau que
+    // les vrais problèmes. Sans cela chaque passe trouve dix nouveaux détails et la boucle ne finit jamais.
+    // « Relecture complète » (action full) repart sur une review entière, par exemple après un nouveau développement.
+    const verify = !!prev && input.action !== 'full'
+    const history = { verify, earlier: olderRuns.map(passOf) }
+    const outOfScope = (log: (text: string) => void) => (dropped: { file: string; line: number; title: string }[]) =>
+      log(`Hors de la PR, écartée(s) : ${dropped.map((f) => `${f.file}:${f.line} ${f.title}`).join(' · ')} (code que la branche n’a pas écrit).`)
+    /** Passe de vérification : les nouvelles suggestions sont écartées, quoi qu'en dise l'agent. */
+    const closing = (out: ReviewOutput, log?: (text: string) => void): ReviewOutput => {
+      if (!verify) return out
+      const kept = out.findings.filter((f) => f.severity !== 'suggestion' || f.previousId)
+      if (kept.length < out.findings.length) log?.(`Passe de vérification : ${out.findings.length - kept.length} nouvelle(s) suggestion(s) écartée(s) (« Relecture complète » pour les voir).`)
+      return { ...out, findings: kept }
+    }
+    // Le diff relu est gardé : la passe suivante saura quels fichiers ont changé depuis.
+    const keepDiff = (runId: string) => writeFileSync(selfReviewDiffPath(runId), ctxd.diff)
     // Même découpage que la review : au-delà d'un diff raisonnable, un agent par lot.
     const { lots, skipped } = splitIntoLots(ctxd.diff, isMonorepo(project.path))
     if (lots.length >= 2) {
-      return startJob({ kind, title: `Auto-review #${pr.number} · ${lots.length} lots`, scope }, async (ctx): Promise<ReviewOutput> => {
+      const filesOf = lots.map((l) => [...diffLines(l.diff).keys()])
+      const batches = (except?: number) => lots.map((l, i) => (i === except ? '' : `- Batch ${i + 1} "${l.name}" (${l.files} files): ${filesOf[i].slice(0, 60).join(', ')}${filesOf[i].length > 60 ? '…' : ''}`)).filter(Boolean).join('\n')
+      return startJob({ kind, title: `Auto-review ${name} · ${lots.length} lots`, scope }, async (ctx): Promise<ReviewOutput> => {
+        if (prev) ctx.log({ t: 'info', text: `${verify ? 'Passe de vérification' : 'Relecture complète'} : ${prev.items.filter((i) => i.status === 'fixed').length} correction(s) à vérifier, ${prev.items.filter((i) => i.status === 'ignored').length} remarque(s) ignorée(s) à ne pas ressortir.` })
         const parts = await reviewLots<ReviewOutput>(ctx, {
-          repo: project.repo, pr: pr.number, lots, skipped, commits: ctxd.commits, note: '',
-          child: (l, i, v) => specFrom('self-review', { ...selfVars, ...v }, { ...spec, kind: 'self-review-part', title: `Auto-review #${pr.number} · ${l.name}`, scope: { ...scope, ref: `lot${i + 1}` } }),
+          repo: project.repo, pr: pr?.number ?? (d.worktree.branch ?? 'branch').replace(/[^\w.-]/g, '_'), lots, skipped, commits: ctxd.commits,
+          // Chaque lot sait ce que relisent les autres : il vérifie ce qui le relie à eux, sans relire leurs fichiers.
+          note: (_l, i) => [
+            '## The other batches',
+            'Reviewed at the same time by other reviewers. Do not report on their files, but when a file of your batch depends on one of theirs (API route and the screen that calls it, shared type or schema, translation key), open it and check that both sides agree: a mismatch is a finding, placed on the line of your batch. A last reviewer then reads all the findings together.',
+            batches(i),
+          ].join('\n'),
+          child: (l, i, v) => specFrom('self-review', { ...selfVars, ...v, previous: previousPassText(prev, ctxd.diff, { ...history, files: new Set(filesOf[i]) }) }, { ...spec, kind: 'self-review-part', title: `Auto-review ${name} · ${l.name}`, scope: { ...scope, ref: `lot${i + 1}` } }),
           count: (out) => out.findings.length,
         })
         const ok = parts.filter((p): p is { zone: string; out: ReviewOutput } => !!p.out)
         if (!ok.length) throw new Error('Toutes les auto-reviews de lot ont échoué')
         const merged = mergeSelfReviews(ok)
+        // Relecture d'ensemble : les lots ne se voient pas entre eux. Un dernier agent lit toutes leurs remarques,
+        // retire doublons et contradictions, et cherche ce qui tient à plusieurs lots (contrat API / écran…).
+        const whole = await ctx.runChild(specFrom('self-review-merge', {
+          ...selfVars, 'diff.path': ctxd.diffPath, batches: batches(),
+          findings: merged.findings.map((f) => `### id: ${f.id}\n${f.file}:${f.line} · ${f.severity} · ${f.title}\n${f.body}\nFix: ${f.fix}`).join('\n\n') || '(no finding)',
+          previous: previousPassText(prev, ctxd.diff, history),
+        }, { ...spec, schema: schemas.selfReviewMergeSchema, kind: 'self-review-part', title: `Auto-review ${name} · relecture d’ensemble`, scope: { ...scope, ref: 'merge' } }))
+        const all = whole.status === 'success' ? (whole.structured as SelfReviewMergeOutput | null) : null
+        if (all) {
+          const drop = new Map(all.drop.map((x) => [x.id, x.reason]))
+          const kept = merged.findings.filter((f) => !drop.has(f.id))
+          ctx.log({ t: 'info', text: `Relecture d’ensemble : ${merged.findings.length - kept.length} doublon(s) ou contradiction(s) retiré(s), ${all.add.length} remarque(s) entre lots ajoutée(s).` })
+          for (const f of merged.findings) if (drop.has(f.id)) ctx.log({ t: 'info', text: `Retirée · ${f.file}:${f.line} ${f.title} : ${drop.get(f.id)}` })
+          merged.findings = [...kept, ...all.add.map((f, i) => ({ ...f, id: `x${i + 1}` }))].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+          merged.summary = all.summary
+        } else ctx.log({ t: 'info', text: 'Relecture d’ensemble en échec : les remarques des lots sont gardées telles quelles.' })
         const failed = parts.filter((p) => !p.out).map((p) => p.zone)
         if (failed.length) merged.summary += `\n\n(Lots non relus suite à une erreur : ${failed.join(', ')}.)`
-        return finishSelfReview(merged, ctxd.diff, cwd)
+        keepDiff(ctx.run.id)
+        return finishSelfReview(closing(merged, (text) => ctx.log({ t: 'info', text })), ctxd.diff, cwd, { read: [...lots.map((l) => l.diff), ctxd.diff], size: !verify, onOutOfScope: outOfScope((text) => ctx.log({ t: 'info', text })) })
       })
     }
+    const id = randomUUID()
     return startRun(
-      specFrom(kind, { ...selfVars, context: ctxd.context, 'diff.path': ctxd.diffPath }, {
-        ...spec, kind, title: `Auto-review #${pr.number}`, scope,
+      specFrom(kind, { ...selfVars, context: ctxd.context, 'diff.path': ctxd.diffPath, previous: previousPassText(prev, ctxd.diff, history) }, {
+        ...spec, id, kind, title: `Auto-review ${name}`, scope,
         onSuccess: async (run) => {
-          if (run.structured) run.structured = finishSelfReview(run.structured as ReviewOutput, ctxd.diff, cwd)
+          if (run.structured) run.structured = finishSelfReview(closing(run.structured as ReviewOutput, (text) => run.events.push({ t: 'info', text })), ctxd.diff, cwd, { size: !verify, onOutOfScope: outOfScope((text) => run.events.push({ t: 'info', text })) })
+          keepDiff(id)
         },
       }),
     )
@@ -202,7 +279,14 @@ export const reviewActions: WorktreeActions = {
     return startJob({ kind, title: `Corriger ${findings.length} remarque(s) de l’auto-review`, scope: { ...scope, ref: input.ref } }, async (ctx): Promise<FindingsFixAllOutput> => {
       let progress = 0
       ctx.log({ t: 'progress', done: 0, total: findings.length, label: 'remarques corrigées', at: Date.now() })
+      // Périmètre de la PR : les fichiers que la branche modifie déjà (commités ou en cours). L'agent doit y rester.
+      const base = d.pr?.base ?? project.baseBranch
+      const prFiles = new Set([...(await git.changedFiles(cwd, base).catch(() => [])), ...d.dirtyFiles.map((f) => f.path)])
       const r = await ctx.runChild(specFrom('findings-fix-all', {
+        scope: [...prFiles].sort().map((f) => `- ${f}`).join('\n') || '(none)',
+        // Le travail de la branche (ticket, commits, corrections déjà faites) : l'agent s'y adapte au lieu d'appliquer à la lettre.
+        context: await branchContext(d),
+        review: [selfReviewNotes(input.ref), earlierFixesText((() => { const before = passBefore(project.id, input.worktree!, input.ref); return before ? passOf(before) : null })())].filter(Boolean).join('\n\n'),
         findings: findings.map((f) => [
           `### id: ${f.id}`,
           `${f.file}:${f.line} · ${f.severity} · ${f.title}`,
@@ -222,8 +306,12 @@ export const reviewActions: WorktreeActions = {
       }))
       const out = r.status === 'success' ? (r.structured as FindingsFixAllAgentOutput | null) : null
       if (!out) throw new Error(r.events.filter((e) => e.t === 'error').at(-1)?.text ?? (r.status === 'cancelled' ? 'Arrêté' : 'Échec de l’agent'))
+      const outside = (await git.dirtyFiles(cwd).catch(() => [])).map((f) => f.path).filter((f) => !prFiles.has(f))
+      if (outside.length) ctx.log({ t: 'info', text: `⚠ Fichiers touchés hors de la PR (à vérifier ou annuler avant de commiter) : ${outside.join(', ')}` })
       let url: string | null = null
-      if (out.items.some((i) => i.status === 'fixed')) {
+      // Avant la PR, rien n'est commité : les corrections rejoignent le travail en cours, à commiter avec lui.
+      if (!d.pr) ctx.log({ t: 'info', text: 'Pas encore de PR : les corrections restent dans le worktree, à commiter avec la carte Commiter (onglet Ticket).' })
+      else if (out.items.some((i) => i.status === 'fixed')) {
         try {
           url = await commitAndPush(d, out.commitTitle)
           ctx.log({ t: 'info', text: url ? `Commit poussé : ${url}` : 'Aucun changement à commiter.' })
@@ -241,8 +329,9 @@ export const reviewActions: WorktreeActions = {
       const results = findings.map((f) => {
         const it = out.items.find((i) => i.id === f.id)
         const ok = it?.status === 'already' || (it?.status === 'fixed' && !blocked)
-        const detail = it?.status === 'fixed' && blocked ? 'Corrigé, mais commit refusé par un hook : solution à valider' : it?.summary ?? 'Non traité par l’agent'
-        return { id: f.id, ok, detail }
+        const detail = it?.status === 'fixed' && blocked ? 'Corrigé, mais commit refusé par un hook : solution à valider'
+          : it?.status === 'declined' ? `Refusée par l’agent : ${it.summary}` : it?.summary ?? 'Non traité par l’agent'
+        return { id: f.id, ok, detail, ...(it?.status === 'declined' && { declined: true }) }
       })
       // Le compteur suivait la liste de tâches de l'agent, qui n'en tient pas toujours une : il finit sur le résultat réel.
       ctx.log({ t: 'progress', done: results.filter((x) => x.ok).length, total: findings.length, label: 'remarques corrigées', at: Date.now() })
@@ -255,11 +344,12 @@ export const reviewActions: WorktreeActions = {
     return startRun(
       specFrom('finding-fix', {
         'finding.file': f.file, 'finding.line': f.line, 'finding.severity': f.severity, 'finding.title': f.title, 'finding.body': f.body, 'finding.fix': f.fix,
+        context: await branchContext(d),
       }, {
         kind, title: `Corriger ${f.file}:${f.line}`, scope: { ...scope, ref: input.ref ?? f.id }, cwd, schema: schemas.fixSchema,
         onSuccess: async (run) => {
           const out = run.structured as FixOutput
-          if (!out.changed) return
+          if (!out.changed || !d.pr) return
           const url = await commitAndPush(d, out.commitTitle).catch((e) => blockOnRefusal(run, e, out.commitTitle))
           run.events.push({ t: 'info', text: url ? `Commit poussé : ${url}` : 'Aucun changement à commiter.' })
         },

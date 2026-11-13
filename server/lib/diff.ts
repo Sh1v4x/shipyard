@@ -1,4 +1,18 @@
-import type { DiffLine } from '../../shared/types.ts'
+import type { DiffFile, DiffLine } from '../../shared/types.ts'
+
+const MAX_LINES_PER_FILE = 1500
+
+/** Fichiers d'un diff calculé en local (branche sans PR), dans la forme de l'onglet Fichiers. */
+export function diffFiles(diff: string): DiffFile[] {
+  return [...parseUnifiedDiff(diff)].map(([path, all]) => ({
+    path,
+    additions: all.filter((l) => l.t === '+').length,
+    deletions: all.filter((l) => l.t === '-').length,
+    viewed: false,
+    lines: all.slice(0, MAX_LINES_PER_FILE),
+    truncated: all.length > MAX_LINES_PER_FILE,
+  }))
+}
 
 export function parseUnifiedDiff(diff: string): Map<string, DiffLine[]> {
   const files = new Map<string, DiffLine[]>()

@@ -675,6 +675,7 @@ export type ActionKind =
   | 'test-part'
   | 'test-manual'
   | 'test-check'
+  | 'test-ask'
   | 'pr-video'
   | 'checks-analyze'
   | 'hook-fix-plan'
@@ -750,6 +751,17 @@ export interface Finding {
   fix: string
   /** Fil déjà ouvert sur le même sujet ou au même endroit : la réponse du développeur s'affiche avec la remarque. */
   relatedThreadId?: string | null
+  /** Remarque de la passe précédente que celle-ci reprend (pas corrigée, mal corrigée, ou refus de l'agent contesté). */
+  previousId?: string | null
+}
+
+/** Relecture d'ensemble après une auto-review par lots : ce qui se recoupe entre lots, et ce qu'aucun lot ne pouvait voir seul. */
+export interface SelfReviewMergeOutput {
+  summary: string
+  /** Remarques à retirer (doublon d'une autre, ou contredite par un autre lot), avec la raison. */
+  drop: { id: string; reason: string }[]
+  /** Remarques qui tiennent à plusieurs lots à la fois (contrat entre deux zones, incohérence). */
+  add: Finding[]
 }
 
 export interface ReviewOutput {
@@ -810,10 +822,25 @@ export interface PrReviewOutput {
 
 /** Ma review en attente sur GitHub (commentaires préparés, pas encore envoyés). */
 /** Réponse de l'onglet Fichiers : diff de la PR et fils de discussion. */
+/** Worktree de review face à la branche de la PR sur GitHub : ce que l'auteur a poussé depuis mon dernier passage. */
+export interface ReviewBranchState {
+  /** Commits de la PR absents en local, du plus récent au plus ancien. */
+  incoming: { sha: string; author: string; at: string; subject: string }[]
+  /** L'auteur a réécrit sa branche (force-push, rebase) : la version locale n'en fait plus partie. */
+  rewritten: boolean
+  /** Fichiers modifiés en local, qui empêchent de récupérer. */
+  dirty: number
+}
+
 export interface PrFiles {
   prId: string
   files: DiffFile[]
   localDiff: boolean
+  /**
+   * Branche sans PR : diff calculé en local face à origin/<base> (changements non commités compris), pour relire avant
+   * d'ouvrir la PR. fresh : origin/<base> a pu être récupéré sur GitHub juste avant (sinon la comparaison peut dater).
+   */
+  local?: { base: string; fresh: boolean }
   threads: ReviewThread[]
 }
 
@@ -872,13 +899,15 @@ export interface CommentsFixAllOutput {
 /** Auto-review : un seul agent corrige toutes les remarques acceptées, puis un seul commit. */
 export interface FindingsFixAllAgentOutput {
   commitTitle: string
-  items: { id: string; status: 'fixed' | 'already' | 'failed'; summary: string }[]
+  /** declined : l'agent a refusé le correctif (il contredit le travail de la branche ou casserait un comportement voulu), raison dans summary. */
+  items: { id: string; status: 'fixed' | 'already' | 'failed' | 'declined'; summary: string }[]
 }
 
 export interface FindingsFixAllOutput {
   /** Commit poussé, null si rien n'a été commité (rien de corrigé, ou commit refusé par un hook). */
   url: string | null
-  results: { id: string; ok: boolean; detail: string }[]
+  /** declined : l'agent a refusé le correctif (raison dans detail). */
+  results: { id: string; ok: boolean; detail: string; declined?: boolean }[]
 }
 
 /** L'agent de « Tout accepter » : un résultat par fil, et un seul titre de commit pour l'ensemble. */
@@ -904,7 +933,7 @@ export interface TicketPlanOutput {
   reply?: string | null
 }
 
-/** Question ou recherche sur le travail d'une branche (onglet Ticket › Modification libre), sans rien modifier. */
+/** Question ou recherche sur le travail d'une branche (onglet Ticket › Modification libre) ou sur un test (onglet Tests), sans rien modifier. */
 export interface BranchAskOutput {
   /** La réponse en bref, 1 à 3 phrases. */
   summary: string
@@ -1061,8 +1090,11 @@ export interface ChecksAnalyzeOutput {
 export interface ManualTestOutput {
   /** Ce que l'agent a préparé (dépendances, .env, base, données de test), en 1 à 3 phrases. */
   setup: string
-  /** Commandes qui font tourner l'app : lancées par Shipyard et gardées allumées pendant mon test. */
-  services: { name: string; cwd: string; command: string; port: number | null }[]
+  /**
+   * Commandes qui font tourner l'app : lancées par Shipyard et gardées allumées pendant mon test.
+   * check : commande en lecture seule qui ne réussit que si le service marche vraiment (pas seulement son port ouvert).
+   */
+  services: { name: string; cwd: string; command: string; port: number | null; check?: string | null }[]
   /** Page à ouvrir dans Chrome ; null pour une app mobile (émulateur). */
   url: string | null
   /** Comptes de dev, données créées : ce qu'il faut savoir avant de commencer ; vide si rien. */

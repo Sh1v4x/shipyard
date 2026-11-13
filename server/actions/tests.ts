@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import type { ActionKind, ManualTestOutput, MultiTestOutput, TestOutput, RunVideo, RunScope, Project, Run, WorktreeDetail } from '../../shared/types.ts'
+import type { ActionKind, BranchAskOutput, ManualTestOutput, MultiTestOutput, TestOutput, RunVideo, RunScope, Project, Run, WorktreeDetail } from '../../shared/types.ts'
 import { HttpError, VIDEOS_DIR } from '../lib/config.ts'
 import { androidDevice, ensurePlaywrightFfmpeg, startAndroidRecorder, toMp4, trimAroundActions, videoDuration, type AndroidRecorder } from '../lib/video.ts'
-import { getRun, listRuns, onRunEnd, startJob, startRun, type RunSpec } from '../lib/claude.ts'
+import { AgentRetry, getRun, listRuns, onRunEnd, startJob, startRun, type RunSpec } from '../lib/claude.ts'
 import { run } from '../lib/exec.ts'
 import * as gh from '../lib/github.ts'
 import { addTestLessons, branchTestMemory, projectTestMemory } from '../lib/testMemory.ts'
-import { startManualEnv, stopManualEnv } from '../lib/manualEnv.ts'
+import { ManualEnvError, startManualEnv, stopManualEnv } from '../lib/manualEnv.ts'
 import * as schemas from '../schemas.ts'
 import { linkedWorktrees, worktreeDetail } from '../services.ts'
 import { platformOf } from '../lib/platform.ts'
@@ -23,6 +23,30 @@ const testSubject = (d: WorktreeDetail) =>
   `${d.pr ? `PR #${d.pr.number} (${d.pr.title})` : `the branch ${d.worktree.branch ?? d.worktree.head.slice(0, 7)} (no PR yet)`} of the repository ${d.project.name}`
 
 const testConsigne = (consigne: string) => (consigne ? `## The user's instructions for this test (take priority)\n\n${consigne}` : '')
+
+/** Reprise de l'agent du test manuel quand ce qu'il a décrit ne démarre pas ou ne marche pas une fois lancé par Shipyard. */
+const manualEnvRepair = (error: string) => `Shipyard ran the services from your output, and the environment does not work:
+
+${error}
+
+Shipyard stopped every service it had started. Fix it:
+- Find the cause: rerun the failing command yourself, read its full output, and check what it depends on (database or Docker not running or stopped since your check, pending migration, missing environment variable or dependency, port taken, a command that only worked in your shell).
+- Fix the environment (start what is missing, apply migrations, install, choose another port, correct the command), without modifying any file tracked by git. Then start each service again, run its check until it passes, and stop everything you started (except Docker).
+- If the cause is in the code of the branch itself and cannot be fixed from the environment, say so at the very start of \`setup\` (what fails, where), and set \`check\` to null for that service so the rest can still be tested.
+
+Then deliver your complete output again (all fields, same steps unless they changed), with the corrected services.`
+
+const reportOf = (r: TestOutput) => [
+  `Suite: \`${r.suite.command}\` — ${r.suite.passed} passed, ${r.suite.failed} failed. ${r.suite.summary}`,
+  r.setup?.trim() ? `Setup: ${r.setup}` : '',
+  ...r.scenarios.map((sc) => `- [${sc.status}] ${sc.name}: ${sc.detail}${sc.decision ? ` (question left to the user: ${sc.decision.question})` : ''}`),
+].filter(Boolean).join('\n')
+
+/** Le rapport d'un test tel que je le lis, pour l'agent qui répond à mes questions dessus. */
+function testReport(out: TestOutput | MultiTestOutput): string {
+  if (!('parts' in out)) return reportOf(out)
+  return out.parts.map((p) => `### ${p.projectName} (${p.platform})\n${p.error ? `Test failed: ${p.error}` : p.output ? reportOf(p.output) : 'No report.'}`).join('\n\n')
+}
 
 /** Mémoires des tests (projet, puis branche), communes au test par l'IA et à la préparation du test manuel. */
 function testMemoryVar(project: string, wtId: string): string {
@@ -289,9 +313,39 @@ export const testsActions: WorktreeActions = {
           const out = r.structured as ManualTestOutput
           saveLessons(project.id, wtId, out.lessons)
           r.events.push({ t: 'info', text: `Lancement de ${out.services.map((x) => x.name).join(', ') || 'rien'}…` })
-          await startManualEnv(wtId, r.id, out, repos.map((x) => x.path))
+          try {
+            await startManualEnv(wtId, r.id, out, repos.map((x) => x.path))
+          } catch (e) {
+            // Un service ne démarre pas ou ne marche pas : l'agent corrige et rend une sortie à jour, plutôt que de me laisser une app cassée.
+            if (e instanceof ManualEnvError) throw new AgentRetry(e.message, manualEnvRepair(e.message))
+            throw e
+          }
           if (out.url) r.events.push({ t: 'info', text: `Ouvert dans Chrome : ${out.url}` })
         },
+      }),
+    )
+  },
+  'test-ask': async ({ kind, input, d, scope, cwd, vars }) => {
+    // Question sur un test terminé : l'agent répond d'après ce qu'il a fait, et propose des modifications à lancer comme correctifs.
+    const request = input.extra?.trim()
+    if (!request) throw new HttpError(400, 'Écris ta question sur le test')
+    const test = input.resumeFrom ? getRun(input.resumeFrom) : null
+    const out = test?.structured as TestOutput | MultiTestOutput | null
+    if (!test || !out || (test.kind !== 'test' && test.kind !== 'test-part')) throw new HttpError(404, 'Test introuvable : lance d’abord un test')
+    const prev = input.previousRunId ? getRun(input.previousRunId) : null
+    const prevOut = prev?.structured as BranchAskOutput | null
+    // Test réparti sur plusieurs dépôts : la session à reprendre est celle de l'agent qui a testé ce worktree.
+    const partId = 'parts' in out ? out.parts.find((p) => p.worktree === input.worktree)?.runId : null
+    const session = prev?.sessionId ?? (partId ? getRun(partId)?.sessionId : test.sessionId) ?? null
+    return startRun(
+      specFrom('test-ask', {
+        ...vars, subject: testSubject(d), consigne: request, report: testReport(out),
+        previous: prev && prevOut ? `## Previous exchange (the user follows up on it)\n\nRequest: ${prev.request ?? ''}\n\nAnswer: ${prevOut.summary}\n${prevOut.sections.map((x) => `### ${x.title}\n${x.body}`).join('\n')}` : '',
+      }, {
+        kind, title: 'Question sur le test', scope: { ...scope, ref: test.id }, cwd, schema: schemas.branchAskSchema, request,
+        addDirs: (await reposOf(d)).slice(1).map((r) => r.path),
+        // L'agent reprend la session du test (ou de l'échange précédent) : il sait ce qu'il a réellement fait.
+        resume: session,
       }),
     )
   },

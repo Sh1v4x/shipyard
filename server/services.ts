@@ -309,6 +309,9 @@ export async function worktreeDetail(project: Project, wtId: string, force = fal
   const base = pr?.base ?? project.baseBranch
   const own = worktree.kind !== 'review' ? worktree.branch : null
   if (worktree.kind !== 'review') git.refreshBaseInBackground(path, base)
+  // Worktree de review : la branche de la PR sur GitHub, où l'auteur pousse ses correctifs.
+  const reviewed = worktree.kind === 'review' && worktree.prNumber ? git.prRef(worktree.prNumber) : null
+  if (reviewed) git.refreshPrHeadInBackground(path, worktree.prNumber!)
   // Ma branche sur GitHub : un collègue a pu y pousser des commits.
   if (own) git.refreshBaseInBackground(path, own)
   const [commitsAhead, dirtyFiles, merge, behindBase, behindRemote, remoteAuthors] = await Promise.all([
@@ -316,8 +319,8 @@ export async function worktreeDetail(project: Project, wtId: string, force = fal
     git.dirtyFiles(path),
     git.mergeState(path),
     worktree.kind === 'review' ? Promise.resolve(0) : git.behindRemote(path, base),
-    own ? git.behindRemote(path, own) : Promise.resolve(0),
-    own ? git.remoteAuthors(path, own) : Promise.resolve([]),
+    own ?? reviewed ? git.behindRemote(path, (own ?? reviewed)!) : Promise.resolve(0),
+    own ?? reviewed ? git.remoteAuthors(path, (own ?? reviewed)!) : Promise.resolve([]),
   ])
   const linked = await Promise.all((await linkedWorktrees(worktree)).map(async (l) => ({
     project: l.project.id, name: l.project.name, id: l.worktree.id, path: l.worktree.path, branch: l.worktree.branch, dirtyFiles: await git.dirtyFiles(l.worktree.path).catch(() => []),
@@ -619,7 +622,7 @@ export async function createBranchOnly(project: Project, branch: string, base: s
 export async function createPullRequest(
   project: Project,
   wtId: string,
-  input: { commits: { title: string; files: string[] }[]; title: string; body: string; base?: string },
+  input: { commits: { title: string; files: string[] }[]; title: string; body: string; base?: string; draft?: boolean },
 ): Promise<{ url: string; commits: string[]; label: string | null }> {
   const path = decodeId(wtId)
   const branch = await git.currentBranch(path)
@@ -635,16 +638,29 @@ export async function createPullRequest(
   }
   await git.push(path, branch)
   // PR déjà ouverte pour cette branche (premier essai abouti malgré une erreur affichée, double clic) : on la reprend.
-  const url = await gh.createPr(path, { title: input.title, body: input.body, base: input.base || project.baseBranch, head: branch }).catch((e: Error) => {
+  const url = await gh.createPr(path, { title: input.title, body: input.body, base: input.base || project.baseBranch, head: branch, draft: input.draft }).catch((e: Error) => {
     const existing = e.message.match(/already exists:\s*(https:\/\/\S+\/pull\/\d+)/)?.[1]
     if (!existing) throw e
     return existing
   })
-  // Label « CodeRabbit en cours » du dépôt, s'il en a un : la PR est créée même si sa pose échoue.
-  const label = repoLabelsWithRole(labelRules(), 'aiReview', await gh.repoLabels(project.repo).catch(warnOn('gh.repoLabels', [])))[0] ?? null
   const num = Number(url.match(/\/pull\/(\d+)/)?.[1])
-  const labeled = label && num ? await gh.editLabels(project.repo, num, [label], []).then(() => label, () => null) : null
+  // En draft, CodeRabbit ne relit pas : son label attend que la PR soit marquée prête (markPrReady).
+  const labeled = input.draft || !num ? null : await addAiReviewLabel(project, num)
   gh.clearPrCache(project.repo)
   return { url, commits: done, label: labeled }
+}
+
+/** Label « CodeRabbit en cours » du dépôt, s'il en a un : renvoie celui posé, null si aucun ou si la pose échoue. */
+async function addAiReviewLabel(project: Project, num: number): Promise<string | null> {
+  const label = repoLabelsWithRole(labelRules(), 'aiReview', await gh.repoLabels(project.repo).catch(warnOn('gh.repoLabels', [])))[0] ?? null
+  return label ? gh.editLabels(project.repo, num, [label], []).then(() => label, () => null) : null
+}
+
+/** Sort ma PR du mode draft : prête pour review, avec le label de relecture IA comme à une création normale. */
+export async function markPrReady(project: Project, num: number): Promise<{ label: string | null }> {
+  await gh.markReady(project.repo, num)
+  const label = await addAiReviewLabel(project, num)
+  gh.clearPrCache(project.repo)
+  return { label }
 }
 

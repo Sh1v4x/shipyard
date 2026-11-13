@@ -1,7 +1,7 @@
 import { useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type {
   ActionKind, ActionsBlock, DiffLine, AgentProcesses, BrokenWorktree, CheckReport, SdkStatus, DigestInfo, LocalTicket, BranchInfo, ClaudeUsage, Credentials, InboxItem, Note, Settings, CreatedTicket, LinearMeta, PendingReview, PrFiles, Project, ProjectOverview, PromptInfo, PromptSource, PromptVersion, ReviewDecisions, StatsReport, StatsScope, ReviewThread,
-  ManualEnv, GeneralComment, ReviewerCandidate, Run, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
+  ManualEnv, GeneralComment, ReviewBranchState, ReviewerCandidate, Run, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
 } from '../../../shared/types.ts'
 import { DEFAULT_LABEL_RULES } from '../../../shared/review.ts'
 import { inboxToQueue, queueCount } from '../../../shared/queue.ts'
@@ -184,6 +184,10 @@ export const useWorktreeStat = (project: string | undefined, wt: string | undefi
 /** Labels du dépôt avec leur couleur (sélecteur de labels), chargés à l'ouverture du sélecteur. */
 export const useRepoLabelDetails = (project: string, enabled: boolean) =>
   useQuery({ queryKey: qk.repoLabelDetails(project), queryFn: () => api<{ name: string; color: string; description: string }[]>(`/projects/${project}/labels/details`), enabled, staleTime: 600_000 })
+
+/** Worktree de review : les commits poussés par l'auteur que je n'ai pas en local (la PR est récupérée à chaque lecture). */
+export const useReviewBranch = (project: string, wt: string) =>
+  useQuery({ queryKey: qk.reviewBranch(project, wt), queryFn: () => api<ReviewBranchState>(`${wtPath(project, wt)}/review-branch`), refetchInterval: 5 * 60_000 })
 
 export const usePrFiles = (project: string, wt: string) =>
   useQuery({ queryKey: qk.files(project, wt), queryFn: () => api<PrFiles>(`${wtPath(project, wt)}/files`) })

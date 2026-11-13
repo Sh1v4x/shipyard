@@ -118,12 +118,20 @@ export function buildSections(state: PrState): Section[] {
     out.push(testsSection(state))
   } else if (pr && w.kind === 'review' && !w.merged) {
     const mineThreads = myOpenThreads(threads)
+    // La branche de la PR sur GitHub : des correctifs poussés par l'auteur, à récupérer pour relire à jour.
+    out.push({ key: 'conflicts', label: 'À jour', group: 'status', ...(d.behindRemote > 0 ? { state: 'warn', summary: plural(d.behindRemote, 'nouveau commit', 'nouveaux commits') } : { state: 'ok', summary: 'à jour' }) })
     out.push({ key: 'review', label: 'Review', group: 'status', ...(awaitsReview(pr, rules) || pr.requestedReviewers.length ? { state: 'warn', summary: 'à faire' } : { state: 'ok', summary: 'rendue' }) })
     if (mineThreads.length || threads?.some((t) => t.byMe && !t.isDraft)) {
       const replies = mineThreads.filter((t) => !t.awaitingReviewer).length
       out.push({ key: 'followup', label: 'Suivi des retours', group: 'status', ...(replies ? { state: 'warn', summary: plural(replies, 'réponse', 'réponses') } : mineThreads.length ? { state: 'wait', summary: `${mineThreads.length} ouverts` } : { state: 'ok', summary: 'tout réglé' }) })
     }
     out.push(ciState(pr), checksState, sdkState, testsSection(state))
+  }
+  // Avant la PR : relire la branche face à sa base et la garder à jour ; le reste de la liste attend la PR.
+  if (!pr && w.kind !== 'review' && !w.merged && w.branch) {
+    out.push(selfReviewSection(state))
+    const late = [d.behindRemote > 0 && `branche ${d.behindRemote}`, d.behindBase > 0 && `${d.project.baseBranch} ${d.behindBase}`].filter(Boolean).join(' · ')
+    out.push({ key: 'conflicts', label: 'À jour', group: 'status', ...(d.merge ? { state: 'ko', summary: `${d.merge.remaining.length}/${d.merge.conflicted.length} en conflit` } : late ? { state: 'warn', summary: `en retard : ${late}` } : { state: 'ok', summary: 'à jour' }) })
   }
   out.push({ key: 'ticket', label: pr ? 'Ticket et commits' : 'Ticket', group: 'work', state: 'none', summary: d.dirtyFiles.length ? plural(d.dirtyFiles.length, 'fichier modifié', 'fichiers modifiés') : '' })
   if (pr && !w.merged && w.kind !== 'mine') out.push({ key: 'files', label: 'Fichiers', group: 'work', state: 'none', summary: String(pr.changedFiles) })

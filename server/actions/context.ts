@@ -67,6 +67,29 @@ export async function prContext(repo: string, num: number, local?: gh.LocalDiff)
   }
 }
 
+/** Diff d'une branche sans PR face à origin/<base> (voir git.branchDiff), sans les fichiers jamais commités. */
+export const localBranchDiff = (cwd: string, base: string) => git.branchDiff(cwd, base, neverCommitted)
+
+/** Comme prContext, pour une branche qui n'a pas encore de PR : son diff face à origin/<base>, calculé en local. */
+export async function localContext(d: WorktreeDetail): Promise<{ context: string; diffPath: string; diff: string; commits: string[] }> {
+  const base = d.project.baseBranch
+  const { diff, fresh } = await localBranchDiff(d.worktree.path, base)
+  const diffPath = join(DIFFS_DIR, `${d.project.repo.replace('/', '__')}-${(d.worktree.branch ?? d.worktree.head).replace(/[^\w.-]/g, '_')}.diff`)
+  writeFileSync(diffPath, diff)
+  const files = (diff.match(/^diff --git /gm) ?? []).length
+  return {
+    diffPath,
+    diff,
+    commits: d.commitsAhead,
+    context: [
+      '## Commits', d.commitsAhead.map((c) => `- ${c}`).join('\n') || '(none yet)', '',
+      '## Diff', `${files} files, ${diff.split('\n').length} lines, in ${diffPath}.`,
+      `The PR is not open yet: this is the diff of the branch against origin/${base} (from their merge base), as the PR will show it. It also contains the changes not committed yet and the new files, which will be part of the PR.`,
+      fresh ? '' : `origin/${base} could not be fetched from GitHub: the comparison uses the last known state of ${base}.`,
+    ].filter(Boolean).join('\n'),
+  }
+}
+
 export async function pool<T, R>(items: T[], size: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length)
   let i = 0

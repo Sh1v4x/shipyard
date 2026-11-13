@@ -648,10 +648,20 @@ export async function deletePendingReview(reviewId: string) {
 
 // ---------- Écritures ----------
 
-/** Jamais en draft : CodeRabbit ne relit pas les PR en draft. */
-export async function createPr(cwd: string, opts: { title: string; body: string; base: string; head: string }) {
-  const args = ['pr', 'create', '--title', opts.title, '--body-file', '-', '--base', opts.base, '--head', opts.head]
+/** draft : seulement si je le demande, CodeRabbit ne relit pas les PR en draft. */
+export async function createPr(cwd: string, opts: { title: string; body: string; base: string; head: string; draft?: boolean }) {
+  const args = ['pr', 'create', '--title', opts.title, '--body-file', '-', '--base', opts.base, '--head', opts.head, ...(opts.draft ? ['--draft'] : [])]
   return (await gh(args, { cwd, input: opts.body, timeoutMs: 120_000 })).trim()
+}
+
+/** Sort la PR du mode draft : elle devient « prête pour review ». */
+export async function markReady(repo: string, num: number) {
+  await gh(['pr', 'ready', String(num), '--repo', repo])
+}
+
+/** Repasse la PR en draft : elle n'est plus à relire tant qu'elle n'est pas remise prête. */
+export async function markDraft(repo: string, num: number) {
+  await gh(['pr', 'ready', String(num), '--repo', repo, '--undo'])
 }
 
 /** Commentaire dans la conversation de la PR. */

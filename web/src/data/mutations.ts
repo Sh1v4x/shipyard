@@ -289,6 +289,24 @@ export function useCreatePr(project: string, wt: string) {
   })
 }
 
+/** Ma PR en draft passe en « prête pour review » (le label de relecture IA est posé à ce moment-là). */
+export function useMarkPrReady(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<{ label: string | null }>(`${wtPath(project, wt)}/pr/ready`, { method: 'POST' }),
+    onSuccess: () => syncProject(qc, project, { wt }),
+  })
+}
+
+/** Ma PR repasse en draft. */
+export function useMarkPrDraft(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api(`${wtPath(project, wt)}/pr/draft`, { method: 'POST' }),
+    onSuccess: () => syncProject(qc, project, { wt }),
+  })
+}
+
 export function useRerequestReview(project: string, wt: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -357,6 +375,15 @@ export function useMergeAction(project: string, wt: string) {
 }
 
 // ---------- Review ----------
+
+/** Récupère dans le worktree de review les commits poussés par l'auteur de la PR. */
+export function usePullReviewBranch(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<{ head: string | null; pulled: number }>(`${wtPath(project, wt)}/review-branch/pull`, { method: 'POST' }),
+    onSuccess: () => syncProject(qc, project, { wt, files: true }),
+  })
+}
 
 export function useAddPendingComments(project: string, wt: string) {
   const qc = useQueryClient()

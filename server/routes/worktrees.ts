@@ -5,6 +5,9 @@ import { attachTestVideo } from '../actions/tests.ts'
 import { HttpError, decodeId, getProject } from '../lib/config.ts'
 import { CommandError, run } from '../lib/exec.ts'
 import * as git from '../lib/git.ts'
+import { diffFiles } from '../lib/diff.ts'
+import { localBranchDiff } from '../actions/context.ts'
+import type { PrFiles, ReviewBranchState } from '../../shared/types.ts'
 import * as gh from '../lib/github.ts'
 import * as svc from '../services.ts'
 import { branchTestMemory, saveBranchTestMemory } from '../lib/testMemory.ts'
@@ -69,7 +72,11 @@ worktreesRoutes.get(`${wt}/stat`, async (c) => c.json(await svc.worktreeStat(get
 worktreesRoutes.get(`${wt}/files`, async (c) => {
   const p = getProject(c.req.param('id'))
   const pr = await svc.worktreePr(p, c.req.param('wt'))
-  if (!pr) throw new HttpError(400, 'Pas de PR')
+  if (!pr) {
+    // Pas encore de PR : le diff de la branche face à origin/<base>, pour relire (et corriger) avant de l'ouvrir.
+    const { diff, fresh } = await localBranchDiff(await svc.worktreePath(p, c.req.param('wt')), p.baseBranch)
+    return c.json({ prId: '', files: diffFiles(diff), localDiff: true, local: { base: p.baseBranch, fresh }, threads: [] } satisfies PrFiles)
+  }
   const [files, threads] = await Promise.all([gh.prFiles(p.repo, pr.number, { cwd: p.path, base: pr.base }, force(c)), gh.threads(p.repo, pr.number, force(c))])
   return c.json({ ...files, threads })
 })
@@ -113,6 +120,24 @@ worktreesRoutes.post(`${wt}/pr`, async (c) => {
   // La vidéo du dernier test part dans la description en arrière-plan (Chrome de Shipyard) : la PR est déjà créée.
   const video = attachTestVideo(p, c.req.param('wt'), out.url)
   return c.json({ ...out, videoRunId: video?.id ?? null })
+})
+
+/** Ma PR en draft passe en « prête pour review ». */
+worktreesRoutes.post(`${wt}/pr/ready`, async (c) => {
+  const p = getProject(c.req.param('id'))
+  const pr = await svc.worktreePr(p, c.req.param('wt'))
+  if (!pr) throw new HttpError(400, 'Pas de PR')
+  return c.json(await svc.markPrReady(p, pr.number))
+})
+
+/** Ma PR repasse en draft (travail à reprendre) : plus personne ne la relit en attendant. */
+worktreesRoutes.post(`${wt}/pr/draft`, async (c) => {
+  const p = getProject(c.req.param('id'))
+  const pr = await svc.worktreePr(p, c.req.param('wt'))
+  if (!pr) throw new HttpError(400, 'Pas de PR')
+  await gh.markDraft(p.repo, pr.number)
+  gh.clearPrCache(p.repo)
+  return c.json({ ok: true })
 })
 
 /** Projet et numéro de PR d'un worktree. */
@@ -179,6 +204,32 @@ worktreesRoutes.post(`${wt}/dirty/apply`, async (c) => {
   }
   await git.discardPaths(d.worktree.path, b.discard.map((f) => known.get(f)!))
   return c.json({ sha, remaining: (await git.dirtyFiles(d.worktree.path)).length })
+})
+
+/** Worktree de review : la PR est d'abord récupérée sur GitHub, puis comparée à ce que j'ai en local. */
+async function reviewBranch(projectId: string, wtId: string) {
+  const p = getProject(projectId)
+  const d = await svc.worktreeDetail(p, wtId)
+  if (d.worktree.kind !== 'review' || !d.pr) throw new HttpError(400, 'Ce worktree n’est pas une review de PR')
+  const cwd = d.worktree.path
+  await git.fetchPrHead(cwd, d.pr.number)
+  const ref = git.prRef(d.pr.number)
+  const incoming = await git.incomingCommits(cwd, ref)
+  const state: ReviewBranchState = { incoming, rewritten: incoming.length > 0 && (await git.aheadOfRemote(cwd, ref)) > 0, dirty: d.dirtyFiles.length }
+  return { p, d, cwd, ref, state }
+}
+
+worktreesRoutes.get(`${wt}/review-branch`, async (c) => c.json((await reviewBranch(c.req.param('id'), c.req.param('wt'))).state))
+
+/** Récupère les commits poussés par l'auteur : le worktree se place sur la tête de la PR, pour relire à jour. */
+worktreesRoutes.post(`${wt}/review-branch/pull`, async (c) => {
+  const { p, d, cwd, ref, state } = await reviewBranch(c.req.param('id'), c.req.param('wt'))
+  if (d.merge) throw new HttpError(409, 'Une fusion est en cours dans ce worktree : termine-la ou annule-la d’abord')
+  if (state.dirty) throw new HttpError(409, `${state.dirty} fichier(s) modifié(s) en local : annule-les avant de récupérer la branche de la PR`)
+  const head = state.incoming.length ? await git.moveToRemote(cwd, ref) : null
+  // Le diff et les fils de la PR ont bougé avec ces commits : la vue du projet et la PR sont relues.
+  gh.clearPrCache(p.repo)
+  return c.json({ head, pulled: state.incoming.length })
 })
 
 /** Annule la fusion de la base en cours : le worktree revient à l'état d'avant. */

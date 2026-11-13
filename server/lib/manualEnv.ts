@@ -5,7 +5,7 @@ import { join, resolve, sep } from 'node:path'
 import type { ManualEnv, ManualTestOutput } from '../../shared/types.ts'
 import { agentEnv } from './claude.ts'
 import { DATA_DIR } from './config.ts'
-import { run } from './exec.ts'
+import { CommandError, run } from './exec.ts'
 
 // Test manuel : l'agent prépare l'environnement puis s'arrête (ce qu'il lance part avec lui). Les commandes
 // qu'il renvoie sont lancées ici, gardées allumées tant que je teste, et arrêtées par le bouton ou avec le serveur.
@@ -21,6 +21,11 @@ interface Env { runId: string; url: string | null; startedAt: string; services: 
 const envs = new Map<string, Env>()
 
 const READY_TIMEOUT = 5 * 60_000
+// Un service dont le port répond peut encore compiler ou se connecter à sa base : sa vérification a ce délai pour passer.
+const CHECK_TIMEOUT = 90_000
+
+/** Un service ne démarre pas ou ne marche pas : l'agent qui l'a décrit peut corriger (voir test-manual). */
+export class ManualEnvError extends Error {}
 
 const alive = (s: Service) => s.child.exitCode == null && s.child.signalCode == null
 
@@ -40,6 +45,26 @@ const portOpen = (port: number) =>
   })
 
 const tail = (file: string, lines = 30) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').slice(-lines).join('\n').trim() : '')
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** Arrête l'environnement et rend l'erreur à lever, avec la fin de la sortie du service fautif. */
+async function failure(wtId: string, s: Service, why: string, detail = '') {
+  const out = tail(s.log, 25)
+  await stopManualEnv(wtId)
+  return new ManualEnvError([`Service « ${s.name} » ${why}.`, detail.trim(), out && `Sortie du service :\n${out}`].filter(Boolean).join('\n'))
+}
+
+/** La page de départ répond-elle sans erreur serveur ? null si oui, sinon ce qui ne va pas. */
+async function pageError(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(60_000) })
+    await res.body?.cancel()
+    return res.status >= 500 ? `HTTP ${res.status}` : null
+  } catch (e) {
+    return (e as Error).message
+  }
+}
 
 /** Le groupe du service (detached : lui et ce qu'il lance), SIGTERM puis SIGKILL s'il traîne. */
 async function killService(s: Service) {
@@ -90,8 +115,8 @@ export async function startManualEnv(wtId: string, runId: string, out: ManualTes
   await stopManualEnv(wtId)
   for (const s of out.services) {
     const cwd = resolve(s.cwd)
-    if (!dirs.some((d) => cwd === d || cwd.startsWith(d + sep))) throw new Error(`Service « ${s.name} » : dossier hors du worktree (${s.cwd})`)
-    if (s.port != null && (await portOpen(s.port))) throw new Error(`Port ${s.port} (${s.name}) déjà occupé par un autre processus : libère-le, puis relance.`)
+    if (!dirs.some((d) => cwd === d || cwd.startsWith(d + sep))) throw new ManualEnvError(`Service « ${s.name} » : dossier hors du worktree (${s.cwd})`)
+    if (s.port != null && (await portOpen(s.port))) throw new ManualEnvError(`Port ${s.port} (${s.name}) déjà occupé par un autre processus.`)
   }
 
   const dir = join(DIR, runId)
@@ -111,13 +136,34 @@ export async function startManualEnv(wtId: string, runId: string, out: ManualTes
   for (const s of env.services) {
     while (s.port != null && !(await portOpen(s.port))) {
       if (!alive(s) || Date.now() > deadline) {
-        const why = alive(s) ? `ne répond pas sur le port ${s.port} après ${READY_TIMEOUT / 60_000} min` : 's’est arrêté'
-        const out = tail(s.log, 15)
-        await stopManualEnv(wtId)
-        throw new Error(`Service « ${s.name} » ${why}.${out ? `\n${out}` : ''}`)
+        throw await failure(wtId, s, alive(s) ? `ne répond pas sur le port ${s.port} après ${READY_TIMEOUT / 60_000} min` : 's’est arrêté au lancement')
       }
-      await new Promise((r) => setTimeout(r, 1000))
+      await sleep(1000)
     }
+  }
+
+  // Port ouvert ne veut pas dire service qui marche (base injoignable, migration manquante…) : la vérification de l'agent tranche.
+  for (const [i, s] of env.services.entries()) {
+    const check = out.services[i]?.check?.trim()
+    const until = Date.now() + CHECK_TIMEOUT
+    for (let error = ''; check; await sleep(3000)) {
+      if (!alive(s)) throw await failure(wtId, s, 's’est arrêté après son lancement')
+      try {
+        await run('/bin/sh', ['-c', check], { cwd: resolve(out.services[i]!.cwd), env: agentEnv(), timeoutMs: 30_000 })
+        break
+      } catch (e) {
+        error = e instanceof CommandError ? `${e.stdout}\n${e.stderr}`.trim().slice(-1500) : (e as Error).message
+      }
+      if (Date.now() > until) throw await failure(wtId, s, 'a démarré mais ne marche pas : sa vérification échoue', `$ ${check}\n${error}`)
+    }
+  }
+  const dead = env.services.find((s) => !alive(s))
+  if (dead) throw await failure(wtId, dead, 's’est arrêté après son lancement')
+  const page = out.url ? await pageError(out.url) : null
+  if (page) {
+    const logs = env.services.map((s) => `${s.name} :\n${tail(s.log, 15)}`).join('\n\n')
+    await stopManualEnv(wtId)
+    throw new ManualEnvError(`La page de départ ${out.url} ne répond pas correctement (${page}).\n${logs}`)
   }
   await openManualEnv(wtId)
 }

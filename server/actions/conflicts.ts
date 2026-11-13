@@ -75,9 +75,9 @@ async function finishMergeWithFix(ctx: JobContext, d: WorktreeDetail, base: stri
 }
 
 export const conflictsActions: WorktreeActions = {
-  'conflict-resolve': async ({ input, d, scope, cwd, needPr }) => {
-    const pr = needPr()
-    const base = pr.base
+  'conflict-resolve': async ({ input, project, d, scope, cwd }) => {
+    // Sans PR, la branche se met à jour face à la base du projet : c'est celle que visera sa PR.
+    const base = d.pr?.base ?? project.baseBranch
     const prev = input.previousRunId ? getRun(input.previousRunId) : null
     const feedback = input.feedback?.trim()
     let merge = d.merge
@@ -124,12 +124,11 @@ export const conflictsActions: WorktreeActions = {
     return startJob({ kind, title: 'Valider et pousser la fusion', scope: { ...scope, ref: 'merge' } }, async (ctx): Promise<MergeFinishOutput> =>
       ({ url: await finishMergeWithFix(ctx, d, d.merge?.base ?? d.pr?.base ?? project.baseBranch, !!input.autofix) }))
   },
-  'base-sync': async ({ kind, d, scope, cwd, needPr }) => {
+  'base-sync': async ({ kind, project, d, scope, cwd }) => {
     // « Récupérer <base> » en un clic : fusion, conflits résolus par l'IA, commit de fusion (hooks compris,
     // corrigé par l'IA s'il est refusé), push. S'il reste un conflit qu'elle ne peut pas trancher, la fusion reste
     // en cours et se termine dans l'onglet Conflits.
-    const pr = needPr()
-    const base = pr.base
+    const base = d.pr?.base ?? project.baseBranch
     if (!d.worktree.branch) throw new HttpError(400, 'Worktree sans branche')
     // Une fusion de cette même base restée en cours (passage précédent refusé par un hook) est reprise.
     const resume = d.merge && (d.merge.base ?? base) === base ? d.merge : null

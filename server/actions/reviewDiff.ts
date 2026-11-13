@@ -7,7 +7,7 @@ const LOT_FILES = 40
 
 const LOT_LINES = 3000
 
-const SEVERITY_RANK = { bloquant: 0, important: 1, suggestion: 2 } as const
+export const SEVERITY_RANK = { bloquant: 0, important: 1, suggestion: 2 } as const
 
 /** Fichiers sans intérêt pour une review : lockfiles, snapshots, sources générées. */
 const NOISE = /(^|\/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$|\.snap$|\.min\.(js|css)$|(^|\/)(generated|__generated__)\//
@@ -164,14 +164,86 @@ export function finishReview(out: PrReviewOutput, diff: string, cwd: string): Pr
   return checkLines(sized, diff)
 }
 
+/** Lignes que la branche a écrites, par fichier (nouvelle version) : les ajouts, et l'endroit de chaque suppression. */
+export function changedLines(diff: string): Map<string, number[]> {
+  const out = new Map<string, number[]>()
+  for (const block of diff.split(/^(?=diff --git )/m)) {
+    const file = block.match(/^diff --git a\/.+? b\/(.+)$/m)?.[1]
+    if (!file) continue
+    const lines: number[] = []
+    let n: number | null = null
+    for (const l of block.split('\n')) {
+      const h = l.match(/^@@ -\d+(?:,\d+)? \+(\d+)/)
+      if (h) n = Number(h[1])
+      else if (n == null || l.startsWith('+++') || l.startsWith('---')) continue
+      else if (l.startsWith('+')) lines.push(n++)
+      else if (l.startsWith('-')) lines.push(n)
+      else if (l.startsWith(' ')) n++
+    }
+    out.set(file, lines)
+  }
+  return out
+}
+
+/** Écart toléré entre une remarque et la ligne modifiée la plus proche (elle se pose parfois sur la signature, juste au-dessus). */
+const SCOPE_MAX = 5
+
+/**
+ * Ne garde que les remarques posées sur ce que la branche a écrit : une remarque sur du code existant, seulement
+ * visible autour des changements, n'est pas de la PR (et son correctif irait toucher autre chose).
+ */
+export function inScope(out: ReviewOutput, diff: string): { out: ReviewOutput; dropped: Finding[] } {
+  const changed = changedLines(diff)
+  const ok = (f: Finding) => changed.get(f.file)?.some((n) => Math.abs(n - f.line) <= SCOPE_MAX) ?? false
+  return { out: { ...out, findings: out.findings.filter(ok) }, dropped: out.findings.filter((f) => !ok(f)) }
+}
+
+/** Ligne du fichier source (nouvelle version) qui se trouve à la position `pos` (1 = première ligne) d'un fichier de diff. */
+export function positionToLine(diff: string, pos: number): { file: string; line: number } | null {
+  let file: string | null = null
+  let n: number | null = null
+  for (const [i, l] of diff.split('\n').entries()) {
+    const head = l.match(/^diff --git a\/.+? b\/(.+)$/)
+    const hunk = l.match(/^@@ -\d+(?:,\d+)? \+(\d+)/)
+    let here: number | null = null
+    if (head) { file = head[1]; n = null }
+    else if (hunk) n = Number(hunk[1])
+    else if (n != null && (l.startsWith('+') || l.startsWith(' ')) && !l.startsWith('+++')) here = n++
+    if (i + 1 === pos) return file && here != null ? { file, line: here } : null
+  }
+  return null
+}
+
 /**
  * Finalise une auto-review : lignes recalées sur le diff (la remarque s'affiche alors à sa place),
  * puis les composants trop longs, en une remarque de fin.
+ * read : les fichiers de diff lus par les agents. Un agent donne parfois la position dans ce fichier au lieu de la
+ * ligne du code : elle est alors convertie. size : false pour une passe de vérification (déjà dit à la première).
+ * Les remarques posées hors des lignes écrites par la branche sont écartées (onOutOfScope les reçoit, pour le journal).
  */
-export function finishSelfReview(out: ReviewOutput, diff: string, cwd: string): ReviewOutput {
+export function finishSelfReview(out: ReviewOutput, diff: string, cwd: string, opts: { read?: string[]; size?: boolean; onOutOfScope?: (dropped: Finding[]) => void } = {}): ReviewOutput {
   const fix = lineFixer(diff)
-  const findings: Finding[] = out.findings.map((f) => ({ ...f, line: fix(f).line }))
-  const [size] = largeComponents(diff, cwd)
+  const valid = diffLines(diff)
+  const findings: Finding[] = out.findings.map((f) => {
+    // Ligne du diff, ou à quelques lignes près (recalée) : c'est bien une ligne du code.
+    const line = fix(f).line
+    if (valid.get(f.file)?.includes(line)) return { ...f, line }
+    for (const text of opts.read ?? [diff]) {
+      const at = positionToLine(text, f.line)
+      if (at?.file === f.file) return { ...f, line: at.line }
+    }
+    return { ...f, line }
+  })
+  // Hors de ce que la branche a écrit : écarté (voir inScope).
+  const scoped = inScope({ ...out, findings }, diff)
+  if (scoped.dropped.length) opts.onOutOfScope?.(scoped.dropped)
+  return withSize(scoped.out, diff, cwd, opts.size)
+}
+
+/** Les composants trop longs, en une remarque de fin (première passe seulement). */
+function withSize(out: ReviewOutput, diff: string, cwd: string, enabled?: boolean): ReviewOutput {
+  const findings = [...out.findings]
+  const [size] = enabled === false ? [] : largeComponents(diff, cwd)
   if (size) {
     const all = [{ file: size.file, line: size.line, body: size.body }, ...size.also]
     findings.push({

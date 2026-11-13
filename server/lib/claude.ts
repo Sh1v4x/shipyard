@@ -59,6 +59,35 @@ interface Live {
 
 const live = new Map<string, Live>()
 
+/**
+ * Levée par `onSuccess` quand le résultat de l'agent ne tient pas une fois appliqué (ex. un service qu'il a décrit ne démarre pas) :
+ * Shipyard reprend sa session avec `prompt` pour qu'il corrige, au lieu d'échouer. `message` est ce que voit l'utilisateur.
+ */
+export class AgentRetry extends Error {
+  constructor(message: string, public prompt: string) {
+    super(message)
+  }
+}
+
+/** Reprises de l'agent par run après un résultat qui ne tient pas (voir AgentRetry). */
+const MAX_RETRIES = 2
+
+/**
+ * Refus passager entre claude et l'API d'Anthropic (page de blocage Cloudflare, surcharge, coupure réseau) :
+ * le même lancement passe en général quelques secondes plus tard. Un vrai défaut de connexion (401, session expirée) n'en est pas un.
+ */
+const TRANSIENT_API = /Cloudflare|Attention Required|API Error: (403|408|429|5\d\d)|overloaded|rate.?limit|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|Connection error/i
+const MAX_TRANSIENT = 2
+const TRANSIENT_RESUME_PROMPT = 'Shipyard relaunched you: the connection to the API was refused for a moment (network or rate limit), nothing is wrong with your work. Continue the task where you left off and deliver your output.'
+
+/** Dit en clair ce qu'est une fin en erreur de claude (le sous-type « success » avec une erreur n'aide personne). */
+function resultError(subtype: string | undefined, result: unknown): string {
+  const text = result ? String(result).slice(0, 300) : ''
+  if (/Cloudflare|Attention Required/i.test(text)) return `Connexion à l’API d’Anthropic bloquée par Cloudflare (refus passager, VPN ou réseau) : relance, et coupe le VPN si ça persiste. Détail : ${text}`
+  if (/Failed to authenticate|OAuth token|\/login/i.test(text)) return `claude n’a pas pu s’authentifier : relance, ou reconnecte-toi avec « claude /login » si ça persiste. Détail : ${text}`
+  return subtype && subtype !== 'success' ? `Fin en erreur : ${subtype}${text ? ` — ${text}` : ''}` : `Erreur de l’agent : ${text || 'sans détail'}`
+}
+
 const store = createRunStore(RUNS_DIR)
 const save = (run: Run) => store.save(run)
 
@@ -373,12 +402,14 @@ export function startRun(spec: RunSpec): Run {
 
   // Sauvegarde régulière : un rechargement de page ou un redémarrage retrouve l'état du run.
   let dirty = false
-  const flush = setInterval(() => {
-    if (dirty) {
-      dirty = false
-      save(run)
-    }
-  }, 1000)
+  const startFlush = () =>
+    setInterval(() => {
+      if (dirty) {
+        dirty = false
+        save(run)
+      }
+    }, 1000)
+  let flush = startFlush()
   const push = (e: RunEvent) => {
     run.events.push(e)
     dirty = true
@@ -386,6 +417,11 @@ export function startRun(spec: RunSpec): Run {
   }
   // Une seule relance automatique par run après un blocage (voir STALL_MS).
   let relaunched = false
+  // Reprises après un résultat qui ne tient pas (voir AgentRetry).
+  let retries = 0
+  // Relances après un refus passager de l'API (voir TRANSIENT_API), et si l'agent a déjà travaillé (reprise de session plutôt que nouveau départ).
+  let transient = 0
+  let progressed = false
 
   /** Lance claude (ou reprend sa session) et branche sa sortie sur le run. */
   const launch = (prompt: string, resume: string | null | undefined) => {
@@ -395,7 +431,7 @@ export function startRun(spec: RunSpec): Run {
     child.stdin.end(prompt)
     // Coût des lancements précédents (relance) : celui que claude annonce est cumulé pour ce processus seulement.
     const priorCost = run.costUsd ?? 0
-    push({ t: 'info', text: resume && relaunched ? 'claude -p relancé (reprise de la session)' : `claude -p lancé dans ${spec.cwd}` })
+    push({ t: 'info', text: resume && (relaunched || retries > 0 || transient > 0) ? 'claude -p relancé (reprise de la session)' : `claude -p lancé dans ${spec.cwd}` })
 
     // Résultat final reçu, et minuteur qui arrête ensuite les tâches de fond restées ouvertes (voir RESULT_GRACE_MS).
     let resultDelivered = false
@@ -403,6 +439,8 @@ export function startRun(spec: RunSpec): Run {
     // Dernière sortie de claude : sans rien depuis STALL_MS et sans résultat, l'agent est bloqué.
     let lastOutput = Date.now()
     let stalled = false
+    // Fin sur un refus passager de l'API : relancé à la fermeture du processus, au lieu d'échouer.
+    let retryTransient = false
     const watchdog = setInterval(() => {
       if (resultDelivered || child.exitCode != null || Date.now() - lastOutput < STALL_MS) return
       clearInterval(watchdog)
@@ -436,6 +474,7 @@ export function startRun(spec: RunSpec): Run {
       if (msg.session_id) run.sessionId = msg.session_id
       const sub = msg.parent_tool_use_id ? subNames.get(msg.parent_tool_use_id) ?? 'sous-agent' : undefined
       if (msg.type === 'assistant') {
+        progressed = true
         for (const c of msg.message?.content ?? []) {
           if (c.type === 'text' && c.text?.trim()) push({ t: 'text', text: c.text.trim(), sub })
           if (c.type === 'tool_use') {
@@ -453,8 +492,10 @@ export function startRun(spec: RunSpec): Run {
         run.costUsd = priorCost + (msg.total_cost_usd ?? 0)
         run.result = typeof msg.result === 'string' ? msg.result : null
         run.structured = msg.structured_output ?? null
-        if (msg.is_error || msg.subtype !== 'success') push({ t: 'error', text: `Fin en erreur : ${msg.subtype}${msg.result ? ` — ${String(msg.result).slice(0, 300)}` : ''}` })
-        else resultDelivered = true
+        if (msg.is_error || msg.subtype !== 'success') {
+          if (TRANSIENT_API.test(String(msg.result ?? '')) && transient < MAX_TRANSIENT && run.status === 'running') retryTransient = true
+          else push({ t: 'error', text: resultError(msg.subtype, msg.result) })
+        } else resultDelivered = true
         leftovers ??= setTimeout(() => {
           if (child.exitCode != null || run.status !== 'running') return
           push({ t: 'info', text: 'Résultat rendu, mais des tâches de fond tournaient encore (serveurs de test…) : Shipyard les arrête.' })
@@ -476,6 +517,18 @@ export function startRun(spec: RunSpec): Run {
         launch(STALL_RESUME_PROMPT, run.sessionId)
         return
       }
+      // Refus passager de l'API : on attend un peu et on relance (la session si l'agent avait commencé, sinon le même départ).
+      if (retryTransient && run.status === 'running') {
+        transient++
+        const wait = transient * 20
+        push({ t: 'info', text: `Connexion à l’API d’Anthropic refusée (passager) : nouvel essai dans ${wait} s (${transient}/${MAX_TRANSIENT}).` })
+        await new Promise((r) => setTimeout(r, wait * 1000))
+        if (run.status === 'running') {
+          if (progressed && run.sessionId) launch(TRANSIENT_RESUME_PROMPT, run.sessionId)
+          else launch(spec.prompt, spec.resume)
+          return
+        }
+      }
       clearInterval(flush)
       if (run.status !== 'cancelled') {
         if (stalled) push({ t: 'error', text: 'Toujours bloqué après une relance : arrêté.' })
@@ -490,6 +543,15 @@ export function startRun(spec: RunSpec): Run {
           push({ t: 'info', text: 'Application du résultat…' })
           await spec.onSuccess(run)
         } catch (e) {
+          // Le résultat ne tient pas (service qui ne démarre pas…) : l'agent reprend sa session pour corriger.
+          if (e instanceof AgentRetry && retries < MAX_RETRIES && run.sessionId && run.status === 'success') {
+            retries++
+            run.status = 'running'
+            push({ t: 'info', text: `${e.message}\nShipyard relance l’agent pour corriger (${retries}/${MAX_RETRIES}).` })
+            flush = startFlush()
+            launch(e.prompt, run.sessionId)
+            return
+          }
           run.status = 'error'
           push({ t: 'error', text: (e as Error).message })
         }

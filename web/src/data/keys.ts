@@ -37,6 +37,8 @@ export const qk = {
   sdk: (project: string, wt: string) => ['worktree', project, wt, 'sdk'] as const,
   /** Sous ['worktree', projet, wt] : relu à la fin du run qui le prépare. */
   manualEnv: (project: string, wt: string) => ['worktree', project, wt, 'manual-env'] as const,
+  /** Sous ['worktree', projet, wt] : relu avec le worktree après chaque action. */
+  reviewBranch: (project: string, wt: string) => ['worktree', project, wt, 'review-branch'] as const,
   files: (project: string, wt?: string) => (wt ? ['files', project, wt] as const : ['files', project] as const),
   /** Rapports des bots (contrôles) : sous ['threads'], rechargés avec les fils de la PR. */
   checks: (project: string, wt: string) => ['threads', project, wt, 'checks'] as const,

@@ -13,6 +13,7 @@ import { Badge, Empty, PromptMenu, RunPanel, Spinner, ago, useToast } from '../.
 import type { TabProps } from '../Worktree.tsx'
 import { TestVideos } from '../../components/TestVideos.tsx'
 import { ManualTest } from './ManualTest.tsx'
+import { TestAsk } from './TestAsk.tsx'
 import { WorkResult } from './TicketAgent.tsx'
 
 const STATUS = { pass: ['Réussi', 'green'], fail: ['Échec', 'red'], warn: ['À vérifier', 'amber'] } as const
@@ -41,6 +42,11 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
       ? `The PR test raised a point that the user has settled.${where} Scenario: "${name}". Finding: ${detailText}. The user's decision: ${decided}. Apply this decision with a minimal fix, then rerun the relevant test.`
       : `Fix this failure found by the PR test.${where} Scenario: "${name}". Finding: ${detailText}. Minimal fix, then rerun the relevant test.`
     if (await fixer.start({ extra })) toast('Correctif lancé : il s’affiche sous le point concerné')
+  }
+  // Modification proposée par l'IA en réponse à une question sur le test : même correctif, suivi sous la proposition.
+  const askChange = async (title: string, request: string) => {
+    const extra = `Change requested by the user after discussing the PR test with the agent that ran it. Scenario: "${title}". Request: ${request} Minimal change, then rerun the relevant test.`
+    if (await fixer.start({ extra })) toast('Modification lancée : elle s’affiche sous la proposition')
   }
   // Le correctif d'un scénario s'affiche sous lui, sur cette page.
   const fixFor = (name: string) => <FixInline fixer={fixer} name={name} project={project.id} />
@@ -116,6 +122,7 @@ export function TestsTab({ project, detail, wtId }: TabProps) {
           {r && <TestReport r={r} runId={test.id} where={{ project: project.id, wt: wtId }} fixFor={fixFor} fixBusy={fixer.busy} onFix={mine ? askFix : undefined} onRetest={retest} />}
         </>
       )}
+      {r && test.id && !test.busy && <TestAsk key={test.id} project={project.id} wtId={wtId} testRunId={test.id} fixBusy={fixer.busy} onFix={mine ? askChange : undefined} fixFor={fixFor} />}
       <ManualTest project={project} wtId={wtId} consigne={consigne} mine={mine} />
     </section>
   )

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { MergeState, Project, Worktree } from '../../shared/types.ts'
@@ -159,6 +159,35 @@ export async function numstat(cwd: string, base: string): Promise<{ files: numbe
   }
 }
 
+// origin/<base> récupéré il y a moins d'une minute : pas de nouveau fetch (l'onglet Fichiers recharge souvent).
+const baseFetches = new Map<string, { at: number; ok: boolean }>()
+
+/**
+ * Diff de la branche avant sa PR, tel que la PR le montrerait : depuis son point de divergence avec origin/<base>,
+ * récupéré d'abord sur GitHub (jamais la branche de base locale, qui peut être en retard). Les changements non commités
+ * et les nouveaux fichiers pas encore suivis en font partie. fresh : origin/<base> a bien pu être récupéré.
+ * skip : nouveaux fichiers à laisser de côté (jamais commités).
+ */
+export async function branchDiff(cwd: string, base: string, skip: (path: string) => boolean = () => false): Promise<{ diff: string; fresh: boolean }> {
+  const key = `${cwd}|${base}`
+  let fetched = baseFetches.get(key)
+  if (!fetched || Date.now() - fetched.at > 60_000) {
+    fetched = { at: Date.now(), ok: await fetchBranch(cwd, base).then(() => true, () => false) }
+    baseFetches.set(key, fetched)
+  }
+  const mb = (await git(cwd, ['merge-base', `origin/${base}`, 'HEAD'])).trim()
+  const tracked = await git(cwd, ['diff', '--no-color', '--no-ext-diff', mb], 300_000)
+  const untracked = (await git(cwd, ['ls-files', '--others', '--exclude-standard'])).split('\n').filter((f) => f && !skip(f)).slice(0, 200)
+  const added: string[] = []
+  for (const f of untracked) {
+    // Un fichier énorme (dump, export) noierait le diff : il reste listé par git status, pas relu ici.
+    if ((statSync(join(cwd, f), { throwIfNoEntry: false })?.size ?? 0) > 500_000) continue
+    // --no-index sort en code 1 dès qu'il y a une différence : le diff est dans sa sortie.
+    added.push(await git(cwd, ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', '/dev/null', f]).catch((e) => (e instanceof CommandError ? e.stdout : '')))
+  }
+  return { diff: [tracked, ...added].filter(Boolean).join('\n'), fresh: fetched.ok }
+}
+
 /** État d'un worktree avant le passage d'un agent : de quoi remettre ses fichiers tels quels, sans toucher aux commits. */
 export interface Snapshot { path: string; sha: string; index: string | null; untracked: string[] }
 
@@ -316,6 +345,47 @@ export function refreshBaseInBackground(cwd: string, base: string) {
   if (Date.now() - (baseFetchedAt.get(key) ?? 0) < 5 * 60_000) return
   baseFetchedAt.set(key, Date.now())
   void git(cwd, ['fetch', 'origin', base], 120_000).catch(() => baseFetchedAt.delete(key))
+}
+
+// ---------- Worktree de review : suivre la branche de la PR ----------
+
+/** Où est rangée la tête d'une PR une fois récupérée : `origin/pull/<n>` (se lit comme une branche distante). */
+export const prRef = (num: number) => `pull/${num}`
+
+/** Récupère la tête de la PR sur GitHub (refs/pull/<n>/head), y compris après un force-push de l'auteur. */
+export async function fetchPrHead(cwd: string, num: number) {
+  await git(cwd, ['fetch', 'origin', `+refs/pull/${num}/head:refs/remotes/origin/${prRef(num)}`], 120_000)
+}
+
+/** Comme refreshBaseInBackground, pour la tête d'une PR relue : le retard affiché au chargement suivant est à jour. */
+export function refreshPrHeadInBackground(cwd: string, num: number) {
+  const key = `${cwd}|pr${num}`
+  if (Date.now() - (baseFetchedAt.get(key) ?? 0) < 5 * 60_000) return
+  baseFetchedAt.set(key, Date.now())
+  void fetchPrHead(cwd, num).catch(() => baseFetchedAt.delete(key))
+}
+
+/** Commits de origin/<ref> absents en local, du plus récent au plus ancien. */
+export async function incomingCommits(cwd: string, ref: string): Promise<{ sha: string; author: string; at: string; subject: string }[]> {
+  const out = await git(cwd, ['log', '--format=%h%x09%an%x09%cI%x09%s', `HEAD..origin/${ref}`]).catch(() => '')
+  return out.split('\n').filter(Boolean).map((l) => {
+    const [sha, author, at, ...subject] = l.split('\t')
+    return { sha, author, at, subject: subject.join('\t') }
+  })
+}
+
+/** Commits locaux absents de origin/<ref> : après un force-push de l'auteur, l'ancienne version de sa branche. */
+export async function aheadOfRemote(cwd: string, ref: string): Promise<number> {
+  return Number((await git(cwd, ['rev-list', '--count', `origin/${ref}..HEAD`]).catch(() => '0')).trim()) || 0
+}
+
+/**
+ * Met le worktree de review sur la tête de la PR : avance simplement, ou s'y replace si l'auteur a réécrit sa branche
+ * (l'ancienne version reste dans le reflog). À n'appeler que sur un worktree sans modification en cours.
+ */
+export async function moveToRemote(cwd: string, ref: string): Promise<string> {
+  if (!(await git(cwd, ['merge', '--ff-only', `origin/${ref}`], 120_000).then(() => true, () => false))) await git(cwd, ['reset', '--hard', `origin/${ref}`])
+  return (await git(cwd, ['rev-parse', '--short', 'HEAD'])).trim()
 }
 
 /** Récupère une branche et les tags du dépôt distant. */

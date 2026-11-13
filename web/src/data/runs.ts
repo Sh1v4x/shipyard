@@ -53,7 +53,12 @@ export function useRun(id: string | null | undefined, onEnd?: (run: Run) => void
 export function useLatestRun(filter: RunFilter & { project: string; kind: ActionKind }) {
   const qc = useQueryClient()
   const runs = useRuns(filter)
-  const [override, setOverride] = useState<string | null>(null)
+  // Le run choisi à la main (celui qu'on vient de lancer, une ancienne version) ne vaut que pour cette portée : quand
+  // elle change (nouvelle auto-review, donc nouvelle ref pour ses corrections), on revient au dernier run de la nouvelle.
+  const scopeKey = [filter.kind, filter.project, filter.worktree, filter.ref].join('|')
+  const [chosen, setChosen] = useState<{ key: string; id: string | null } | null>(null)
+  const override = chosen?.key === scopeKey ? chosen.id : null
+  const setOverride = (id: string | null) => setChosen({ key: scopeKey, id })
   const id = override ?? runs.data?.[0]?.id ?? null
   // Fin d'un run : ce qu'il a pu écrire (commit, push, réponses GitHub) se voit dans le worktree et la vue du projet.
   const live = useRun(id, () => {

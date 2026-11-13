@@ -152,6 +152,8 @@ export const createPullRequestInput = z.object({
   title: z.string().min(1),
   body: z.string(),
   base: z.string().optional(),
+  /** PR créée en draft : pas encore à relire (ni par l'équipe, ni par CodeRabbit). */
+  draft: z.boolean().optional(),
 })
 
 const draftComment = z.object({ path: z.string(), line: z.number(), body: z.string(), threadId: z.string().nullable() }) satisfies z.ZodType<ReviewDraftComment>

@@ -111,12 +111,12 @@ function CreatePrCard({ project, detail, wtId }: TabProps) {
   const { commitsAhead, dirtyFiles } = detail
   const nothing = !commitsAhead.length
 
-  const submit = () => {
+  const submit = (asDraft = false) => {
     if (!draft) return
     setError(null)
-    createPr.mutate({ ...draft, commits: [], base }, {
+    createPr.mutate({ ...draft, commits: [], base, draft: asDraft }, {
       onSuccess: (r) => {
-        toast(`PR créée${r.label ? ` avec le label « ${r.label} »` : ''} : ${r.url}${r.videoRunId ? '. La vidéo du test est en cours d’ajout à sa description.' : ''}`)
+        toast(`PR créée${asDraft ? ' en draft' : ''}${r.label ? ` avec le label « ${r.label} »` : ''} : ${r.url}${r.videoRunId ? '. La vidéo du test est en cours d’ajout à sa description.' : ''}`)
         if (prep.id) dismiss.mutate(prep.id)
       },
       onError: setError,
@@ -170,7 +170,8 @@ function CreatePrCard({ project, detail, wtId }: TabProps) {
           </div>
           <ErrorBox error={error} />
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={busy || !draft.title.trim()} onClick={submit}>{busy && <Spinner />}Pousser et créer la PR</Button>
+            <Button size="sm" disabled={busy || !draft.title.trim()} onClick={() => submit()}>{busy && <Spinner />}Pousser et créer la PR</Button>
+            <Button size="sm" variant="outline" disabled={busy || !draft.title.trim()} onClick={() => submit(true)} title="La PR est créée sans être à relire : ni l’équipe ni CodeRabbit ne la regardent tant que tu ne l’as pas marquée prête">Créer en draft</Button>
             <Button size="sm" variant="outline" disabled={prep.busy} onClick={() => { setDraft(null); void prep.start() }}>Régénérer</Button>
           </div>
         </div>

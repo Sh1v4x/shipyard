@@ -134,8 +134,22 @@ const finding = {
     body: s('The problem, or the comment to post'),
     fix: s('The concrete fix'),
     relatedThreadId: { type: ['string', 'null'], description: 'Existing thread on the same topic or at the same place, otherwise null' },
+    previousId: { type: ['string', 'null'], description: 'Id of the finding of the previous pass this one follows up on, otherwise null' },
   },
   required: ['id', 'file', 'line', 'severity', 'title', 'body', 'fix', 'relatedThreadId'],
+} as const
+
+export const selfReviewMergeSchema = {
+  type: 'object',
+  properties: {
+    summary: s('2 to 4 sentences on the whole branch'),
+    drop: {
+      type: 'array',
+      items: { type: 'object', properties: { id: s('Finding id, copied as is'), reason: s('Duplicate of which finding, or what contradicts it') }, required: ['id', 'reason'] },
+    },
+    add: { type: 'array', items: finding },
+  },
+  required: ['summary', 'drop', 'add'],
 } as const
 
 export const reviewSchema = {
@@ -239,8 +253,8 @@ export const findingsFixAllSchema = {
         type: 'object',
         properties: {
           id: s('Finding id, copied as is'),
-          status: { type: 'string', enum: ['fixed', 'already', 'failed'] },
-          summary: s('What was done, or why it could not be'),
+          status: { type: 'string', enum: ['fixed', 'already', 'failed', 'declined'] },
+          summary: s('What was done, why it could not be, or why the fix was declined'),
         },
         required: ['id', 'status', 'summary'],
       },
@@ -445,6 +459,7 @@ export const manualTestSchema = {
           cwd: s('Absolute directory to run the command in'),
           command: s('Shell command, in the foreground'),
           port: { type: ['integer', 'null'], description: 'Port that answers once the service is ready, null if none' },
+          check: { type: ['string', 'null'], description: 'Read-only command that exits 0 only when the service really works (e.g. curl -fsS on a route that reads the database), otherwise null' },
         },
         required: ['name', 'cwd', 'command', 'port'],
       },

@@ -12,7 +12,7 @@ import { PriorThread } from '../../components/Thread.tsx'
 import { Markdown } from '../../components/Markdown.tsx'
 import { useAction } from '../../data/runs.ts'
 import { go } from '../../router.ts'
-import { Avatar, Badge, ErrorBox, RunPanel, Spinner, plural, sevLabel, sevTone, useToast } from '../../ui.tsx'
+import { Avatar, Badge, Empty, ErrorBox, RunPanel, Spinner, plural, sevLabel, sevTone, useToast } from '../../ui.tsx'
 import type { TabProps } from '../Worktree.tsx'
 import { BlockedCommit } from '../../components/BlockedCommit.tsx'
 
@@ -26,7 +26,8 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
   const q = usePrFiles(project.id, wtId)
   const setViewed = useSetFileViewed(project.id, wtId)
   const openFile = useOpenInEditor(project.id, wtId)
-  const mine = detail.worktree.kind === 'mine'
+  // Ma PR, ou ma branche avant sa PR (relue face à sa base, en local).
+  const mine = detail.worktree.kind !== 'review'
   const self = useAction<ReviewOutput>('self-review', { project: project.id, worktree: wtId })
   const review = useAction<PrReviewOutput>('review', { project: project.id, worktree: wtId })
   // Remarques acceptées : corrigées ensemble par un seul agent, depuis la liste en bas de l'onglet.
@@ -47,7 +48,7 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
 
   if (q.isLoading) return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />Chargement du diff…</div>
   if (!q.data) return <ErrorBox error={q.error} />
-  const { files, threads, prId } = q.data
+  const { files, threads, prId, local } = q.data
   // Un motif récurrent s'affiche à chacun de ses emplacements dans le diff.
   const findings: (Finding | ReviewComment)[] = mine
     ? self.result?.findings ?? []
@@ -66,10 +67,24 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
     <section className="flex flex-col gap-4" aria-label="Fichiers modifiés">
       <Card className="flex-row flex-wrap items-center justify-between gap-4 px-4 py-3">
         <div className="flex flex-col gap-2">
-          <span className="text-sm"><span className="font-medium">{viewed} / {plural(files.length, 'fichier vu', 'fichiers vus')}</span> <DiffStat add={add} del={del} /></span>
-          <span className="block h-1.5 w-52 overflow-hidden rounded-full bg-muted">
-            <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${files.length ? (100 * viewed) / files.length : 0}%` }} />
-          </span>
+          {local ? (
+            <>
+              <span className="text-sm"><span className="font-medium">{plural(files.length, 'fichier modifié', 'fichiers modifiés')}</span> face à <span className="font-mono text-[13px]">origin/{local.base}</span> <DiffStat add={add} del={del} /></span>
+              <span className={cn('text-xs', local.fresh ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-400')}>
+                {local.fresh
+                  ? `Pas encore de PR : ${local.base} vient d’être récupéré sur GitHub, les changements non commités sont compris.`
+                  : `${local.base} n’a pas pu être récupéré sur GitHub : la comparaison part de son dernier état connu.`}
+                {detail.behindBase > 0 && ` ${local.base} a ${plural(detail.behindBase, 'commit', 'commits')} d’avance : récupère-le dans « À jour ».`}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-sm"><span className="font-medium">{viewed} / {plural(files.length, 'fichier vu', 'fichiers vus')}</span> <DiffStat add={add} del={del} /></span>
+              <span className="block h-1.5 w-52 overflow-hidden rounded-full bg-muted">
+                <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${files.length ? (100 * viewed) / files.length : 0}%` }} />
+              </span>
+            </>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setOpen(Object.fromEntries(files.map((f) => [f.path, true])))}>Tout déplier</Button>
@@ -77,8 +92,10 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
           {mine ? (
             <>
               {self.result && !self.busy && <Badge tone={findings.length ? 'amber' : 'green'}>{plural(findings.length, 'remarque de l’IA', 'remarques de l’IA')}</Badge>}
-              <Button size="sm" disabled={self.busy} onClick={() => self.start()}>
-                {self.busy ? <Spinner /> : <PlayIcon />}{self.result ? 'Relancer l’auto-review' : 'Analyser ma PR avec l’IA'}
+              {/* Après une première passe : vérifier les corrections (rien de nouveau hors vrais problèmes), ou tout relire. */}
+              {self.result && <Button size="sm" variant="outline" disabled={self.busy} onClick={() => self.start({ action: 'full' })} title="Review entière, nouvelles suggestions comprises : après un nouveau développement sur la branche">Relecture complète</Button>}
+              <Button size="sm" disabled={self.busy} onClick={() => self.start()} title={self.result ? 'Vérifie les corrections et ce qui reste ouvert ; ne relève de nouveau que les bugs et régressions, pas de nouvelles suggestions' : undefined}>
+                {self.busy ? <Spinner /> : <PlayIcon />}{self.result ? 'Vérifier les corrections' : local ? 'Analyser ma branche avec l’IA' : 'Analyser ma PR avec l’IA'}
               </Button>
               <Button variant="ghost" size="icon-sm" aria-label="Modifier le prompt d’auto-review" onClick={() => go({ page: 'prompts', key: 'self-review' })}><PencilIcon /></Button>
             </>
@@ -89,9 +106,10 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
           )}
         </div>
       </Card>
-      {mine && <RunPanel id={self.id} events={self.events} running={self.running} run={self.run} label="Les 4 reviewers relisent la PR" onStop={self.stop} action={self} />}
+      {mine && <RunPanel id={self.id} events={self.events} running={self.running} run={self.run} label={local ? 'L’IA relit la branche avant la PR' : 'Les 4 reviewers relisent la PR'} onStop={self.stop} action={self} />}
       {mine && self.result?.summary && <Card className="px-4 py-3 text-sm">{self.result.summary}</Card>}
 
+      {local && !files.length && <Empty title={`Aucun changement face à origin/${local.base}.`} />}
       {files.map((f) => {
         const isOpen = open[f.path] ?? !f.viewed
         const fThreads = threads.filter((t) => t.path === f.path && !t.isResolved)
@@ -108,10 +126,13 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
                 {notes > 0 && <Badge tone="amber">{plural(notes, 'remarque', 'remarques')}</Badge>}
               </button>
               <Button variant="ghost" size="sm" onClick={() => openFile.mutate(f.path, { onError: (e) => toast(e.message, true) })}><ExternalLinkIcon />Ouvrir</Button>
-              <label className="flex h-8 cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium dark:bg-input/30">
-                <Checkbox checked={f.viewed} onCheckedChange={() => toggleViewed(f)} />
-                Vu
-              </label>
+              {/* « Vu » est enregistré sur la PR GitHub : pas avant qu'elle existe. */}
+              {!local && (
+                <label className="flex h-8 cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium dark:bg-input/30">
+                  <Checkbox checked={f.viewed} onCheckedChange={() => toggleViewed(f)} />
+                  Vu
+                </label>
+              )}
             </div>
             {isOpen && (
               <Diff>
@@ -140,7 +161,7 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
         )
       })}
       {mine && self.result && (self.result.findings.length > 0) && (
-        <FindingsBasket findings={self.result.findings} decisions={decisions} decide={decide} fixAll={fixAll} results={fixed} />
+        <FindingsBasket findings={self.result.findings} decisions={decisions} decide={decide} fixAll={fixAll} results={fixed} push={!local} />
       )}
     </section>
   )
@@ -157,12 +178,14 @@ function fixedResults(fixedIds: string[], latest: FindingsFixAllOutput['results'
  * En bas de l'onglet : les remarques de l'auto-review que j'ai acceptées ou ignorées. Un seul bouton lance un seul agent
  * sur toutes les acceptées (au lieu d'un agent par remarque), puis un seul commit.
  */
-function FindingsBasket({ findings, decisions, decide, fixAll, results }: {
+function FindingsBasket({ findings, decisions, decide, fixAll, results, push }: {
   findings: Finding[]
   decisions: ReviewDecisions
   decide: Decide
   fixAll: ReturnType<typeof useAction<FindingsFixAllOutput>>
   results: Map<string, { ok: boolean; detail: string }>
+  /** Avec une PR, les corrections sont commitées et poussées ; avant, elles restent dans le worktree. */
+  push: boolean
 }) {
   const approved = findings.filter((f) => decisions.approved.includes(f.id))
   const toFix = approved.filter((f) => !results.get(f.id)?.ok)
@@ -182,7 +205,7 @@ function FindingsBasket({ findings, decisions, decide, fixAll, results }: {
         <div>
           <p className="font-semibold">Remarques retenues</p>
           <p className="text-sm text-muted-foreground">
-            {plural(approved.length, 'acceptée', 'acceptées')} · {plural(ignored.length, 'ignorée', 'ignorées')} · {pending.length} à trier. Un seul agent corrige toutes les acceptées, puis un seul commit.
+            {plural(approved.length, 'acceptée', 'acceptées')} · {plural(ignored.length, 'ignorée', 'ignorées')} · {pending.length} à trier. {push ? 'Un seul agent corrige toutes les acceptées, puis un seul commit.' : 'Un seul agent corrige toutes les acceptées ; rien n’est commité, les corrections rejoignent ton travail en cours.'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -190,11 +213,11 @@ function FindingsBasket({ findings, decisions, decide, fixAll, results }: {
             <Button size="sm" variant="outline" onClick={() => decide(pending.map((f) => f.id), 'approved')}>Accepter les {pending.length} restantes</Button>
           )}
           <Button size="sm" disabled={!toFix.length || fixAll.busy} onClick={() => void fixAll.start({ findings: toFix })}>
-            {fixAll.busy ? <Spinner /> : <WrenchIcon />}Corriger {plural(toFix.length, 'remarque', 'remarques')} et pousser
+            {fixAll.busy ? <Spinner /> : <WrenchIcon />}Corriger {plural(toFix.length, 'remarque', 'remarques')}{push && ' et pousser'}
           </Button>
         </div>
       </div>
-      <RunPanel id={fixAll.id} events={fixAll.events} running={fixAll.running} run={fixAll.run} label="Un agent corrige les remarques acceptées, puis commit et push" onStop={fixAll.stop} action={fixAll} />
+      <RunPanel id={fixAll.id} events={fixAll.events} running={fixAll.running} run={fixAll.run} label={push ? 'Un agent corrige les remarques acceptées, puis commit et push' : 'Un agent corrige les remarques acceptées'} onStop={fixAll.stop} action={fixAll} />
       <BlockedCommit run={fixAll.run} />
       {/* À trier : ni acceptées ni ignorées, elles comptent encore dans l'étape Self-review. */}
       {pending.length > 0 && (
@@ -262,6 +285,7 @@ function FindingNote({ finding, related, project, wtId, runId, decisions, decide
         <Avatar ai size="sm" />
         <span className="font-medium">Auto-review</span>
         <Badge tone={sevTone[finding.severity]}>{sevLabel[finding.severity]}</Badge>
+        {finding.previousId && <span title="Déjà relevée à la passe précédente : pas corrigée, mal corrigée, ou refus de l’agent contesté"><Badge tone="amber">Suite de la passe précédente</Badge></span>}
         {fixed && <Badge tone="green">Corrigé</Badge>}
         {!fixed && approved && <Badge tone="blue">Acceptée · dans la liste en bas</Badge>}
         {ignored && <Badge tone="gray">Ignorée</Badge>}

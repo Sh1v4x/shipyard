@@ -6,3 +6,4 @@ dist
 .playwright-mcp
 rules.local
 prompts.local
+private.local

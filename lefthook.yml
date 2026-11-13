@@ -14,3 +14,6 @@ pre-push:
       run: pnpm test
     - name: build
       run: pnpm build
+    # Sauvegarde privée (code + prompts.local, rules.local…) vers le remote `private`, s'il existe. Ne bloque jamais le push.
+    - name: private
+      run: pnpm -s private:push --if-configured

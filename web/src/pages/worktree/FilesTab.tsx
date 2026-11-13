@@ -106,7 +106,7 @@ export function FilesTab({ project, detail, wtId }: TabProps) {
           )}
         </div>
       </Card>
-      {mine && <RunPanel id={self.id} events={self.events} running={self.running} run={self.run} label={local ? 'L’IA relit la branche avant la PR' : 'Les 4 reviewers relisent la PR'} onStop={self.stop} action={self} />}
+      {mine && <RunPanel id={self.id} events={self.events} running={self.running} run={self.run} label={local ? 'L’IA relit la branche avant la PR' : 'L’IA relit la PR'} onStop={self.stop} action={self} />}
       {mine && self.result?.summary && <Card className="px-4 py-3 text-sm">{self.result.summary}</Card>}
 
       {local && !files.length && <Empty title={`Aucun changement face à origin/${local.base}.`} />}

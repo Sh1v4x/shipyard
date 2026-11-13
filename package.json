@@ -13,7 +13,9 @@
     "mock": "tsx server/mock/generate.ts",
     "dev:mock": "SHIPYARD_MOCK=mock/demo.json pnpm dev",
     "lint": "biome lint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "private:push": "tsx scripts/private.ts push",
+    "private:pull": "tsx scripts/private.ts pull"
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",

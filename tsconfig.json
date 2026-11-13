@@ -27,6 +27,7 @@
     }
   },
   "include": [
+    "scripts",
     "server",
     "web/src",
     "shared",

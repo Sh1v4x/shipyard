@@ -1,4 +1,4 @@
-import { CalendarDaysIcon, ChartColumnIcon, ChevronRightIcon, ChevronsUpDownIcon, FileTextIcon, FolderGit2Icon, HouseIcon, LightbulbIcon, MenuIcon, PinIcon, PinOffIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, SearchIcon, SettingsIcon, ShipIcon, SquareIcon, StickyNoteIcon, TicketPlusIcon, Trash2Icon, ZapIcon, type LucideIcon } from 'lucide-react'
+import { CalendarDaysIcon, ChartColumnIcon, ChevronRightIcon, ClipboardCheckIcon, ChevronsUpDownIcon, FileTextIcon, FolderGit2Icon, HouseIcon, LightbulbIcon, MenuIcon, PinIcon, PinOffIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, SearchIcon, SettingsIcon, ShipIcon, SquareIcon, StickyNoteIcon, TicketPlusIcon, Trash2Icon, ZapIcon, type LucideIcon } from 'lucide-react'
 import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import type { BrokenWorktree, Project, ProjectOverview, QueueItem, QueueTone } from '../../shared/types.ts'
 import { Button } from '@/components/ui/button'
@@ -20,7 +20,7 @@ import { StatusBar } from './components/StatusBar.tsx'
 import { ChecklistMini } from './pages/worktree/checklist.tsx'
 import { AddProjectPage } from './pages/AddProject.tsx'
 import { OverviewPage } from './pages/Overview.tsx'
-import { AutomationsPage, CreateWorktreePage, DailyPage, InboxPage, StatsPage, InsightsPage, NewTicketPage, NotesPage, PromptsPage, SettingsPage, WorktreePage, loadWorktreePage } from './pages/lazy.ts'
+import { AutomationsPage, CreateWorktreePage, DailyPage, InboxPage, StatsPage, InsightsPage, NewTicketPage, NotesPage, PrecheckPage, PromptsPage, SettingsPage, WorktreePage, loadWorktreePage } from './pages/lazy.ts'
 import { go, href, useRoute, type Route } from './router.ts'
 import { ThemeToggle } from './theme.tsx'
 import { Notif, Spinner, plural, worktreeTitle, useToast } from './ui.tsx'
@@ -84,6 +84,7 @@ export function App() {
           {route.page === 'automations' && <AutomationsPage />}
           {route.page === 'insights' && current && <InsightsPage key={current.id} project={current} mode={route.mode} />}
           {route.page === 'new-ticket' && current && <NewTicketPage key={current.id} project={current} />}
+          {route.page === 'precheck' && current && <PrecheckPage key={`${current.id}:${route.ticket ?? ''}`} project={current} ticket={route.ticket} />}
           {route.page === 'add-project' && <AddProjectPage />}
           {route.page === 'prompts' && <PromptsPage selected={route.key} />}
           {route.page === 'inbox' && <InboxPage />}
@@ -111,6 +112,7 @@ const PAGE_TITLES: Record<Route['page'], string> = {
   automations: 'Automatisations',
   insights: 'Features & optimisations',
   'new-ticket': 'Nouveau ticket',
+  precheck: 'Pre-check',
   'add-project': 'Ajouter un projet',
   prompts: 'Prompts',
   inbox: 'À valider',
@@ -493,6 +495,9 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
             </NavLink>
             <NavLink to={href({ page: 'new-ticket', project: current.id })} icon={TicketPlusIcon} active={route.page === 'new-ticket'}>
               Nouveau ticket
+            </NavLink>
+            <NavLink to={href({ page: 'precheck', project: current.id })} icon={ClipboardCheckIcon} active={route.page === 'precheck'}>
+              Pre-check
             </NavLink>
           </>
         )}

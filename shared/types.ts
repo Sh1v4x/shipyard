@@ -651,6 +651,7 @@ export type ActionRequest = { [K in keyof ActionInput]?: ActionInput[K] | null }
 export type ActionKind =
   | 'branch-name'
   | 'ticket-draft'
+  | 'precheck'
   | 'daily'
   | 'conflict-resolve'
   | 'merge-finish'
@@ -931,6 +932,33 @@ export interface TicketPlanOutput {
   questions: string[]
   /** Réponse au dernier message de l'utilisateur sur le plan (null pour un premier plan). */
   reply?: string | null
+}
+
+/**
+ * Pre-check d'un ticket avant tout worktree : faisabilité, charge estimée et plan, d'après le ticket et le code.
+ * C'est un plan complet (TicketPlanOutput) : une fois approuvé, le travail le suit dans le worktree créé.
+ */
+export interface PrecheckOutput extends TicketPlanOutput {
+  feasibility: {
+    verdict: 'faisable' | 'réserves' | 'bloqué'
+    details: string
+    /** Ce qui empêche de commencer (dépendance absente, décision manquante, ticket trop flou). */
+    blockers: string[]
+  }
+  estimate: {
+    size: 'XS' | 'S' | 'M' | 'L' | 'XL'
+    /** Temps de développement, revue et tests compris (« 1 à 2 jours »). */
+    effort: string
+    confidence: 'faible' | 'moyenne' | 'forte'
+    rationale: string
+  }
+  /** Ce que l'exploration du code a établi (existant, à réutiliser, contraintes), en Markdown : transmis au travail. */
+  findings: string
+  type: 'feat' | 'fix' | 'chore' | 'refactor'
+  /** 2 à 4 mots anglais en kebab-case, pour le nom de la branche. */
+  branch: string
+  /** Dépôts (noms des projets) que le ticket modifie : un worktree est créé dans chacun. */
+  repos: string[]
 }
 
 /** Question ou recherche sur le travail d'une branche (onglet Ticket › Modification libre) ou sur un test (onglet Tests), sans rien modifier. */

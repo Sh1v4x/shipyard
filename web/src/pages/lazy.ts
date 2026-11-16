@@ -8,6 +8,7 @@ export const WorktreePage = lazy(() => loadWorktreePage().then((m) => ({ default
 export const CreateWorktreePage = lazy(() => import('./CreateWorktree.tsx').then((m) => ({ default: m.CreateWorktreePage })))
 export const AutomationsPage = lazy(() => import('./Automations.tsx').then((m) => ({ default: m.AutomationsPage })))
 export const NewTicketPage = lazy(() => import('./NewTicket.tsx').then((m) => ({ default: m.NewTicketPage })))
+export const PrecheckPage = lazy(() => import('./Precheck.tsx').then((m) => ({ default: m.PrecheckPage })))
 export const PromptsPage = lazy(() => import('./Prompts.tsx').then((m) => ({ default: m.PromptsPage })))
 export const NotesPage = lazy(() => import('./Notes.tsx').then((m) => ({ default: m.NotesPage })))
 export const DailyPage = lazy(() => import('./Daily.tsx').then((m) => ({ default: m.DailyPage })))

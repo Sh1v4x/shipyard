@@ -356,6 +356,25 @@ function PlanView({ id, plan, note, feedback, setFeedback, busy, onRevise, onApp
           <p><span className="font-medium">Agent :</span> <span className="whitespace-pre-wrap">{plan.reply}</span></p>
         </div>
       )}
+      <PlanBody plan={plan} />
+      <div className="flex flex-col gap-2">
+        <FieldLabel htmlFor={`${id}-plan-fb`} className="flex-wrap">Échanger sur le plan <span className="font-normal text-muted-foreground">(une question, une réponse aux questions, un ajustement : le plan n’est pas refait de zéro)</span></FieldLabel>
+        <Textarea id={`${id}-plan-fb`} rows={3} value={feedback} onChange={(e) => setFeedback(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && feedback.trim()) onRevise() }}
+          placeholder="Ex. : pourquoi toucher à l’API ? · garde le composant existant et ajoute juste une prop · pour la question 2 : oui, sur le mobile aussi." />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" disabled={busy} onClick={onApprove}>{busy ? <Spinner /> : <CheckIcon />}Approuver et lancer le travail</Button>
+        <Button size="sm" variant="outline" disabled={!feedback.trim()} onClick={onRevise} title="⌘ + Entrée">Envoyer</Button>
+      </div>
+    </div>
+  )
+}
+
+/** Le plan lui-même : approche, étapes, écrans à capturer, points d'attention et questions. */
+export function PlanBody({ plan }: { plan: TicketPlanOutput }) {
+  return (
+    <>
       <div>
         <SectionLabel>Plan proposé</SectionLabel>
         <p className="text-sm leading-relaxed">{plan.summary}</p>
@@ -390,17 +409,7 @@ function PlanView({ id, plan, note, feedback, setFeedback, busy, onRevise, onApp
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex flex-col gap-2">
-        <FieldLabel htmlFor={`${id}-plan-fb`} className="flex-wrap">Échanger sur le plan <span className="font-normal text-muted-foreground">(une question, une réponse aux questions, un ajustement : le plan n’est pas refait de zéro)</span></FieldLabel>
-        <Textarea id={`${id}-plan-fb`} rows={3} value={feedback} onChange={(e) => setFeedback(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && feedback.trim()) onRevise() }}
-          placeholder="Ex. : pourquoi toucher à l’API ? · garde le composant existant et ajoute juste une prop · pour la question 2 : oui, sur le mobile aussi." />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" disabled={busy} onClick={onApprove}>{busy ? <Spinner /> : <CheckIcon />}Approuver et lancer le travail</Button>
-        <Button size="sm" variant="outline" disabled={!feedback.trim()} onClick={onRevise} title="⌘ + Entrée">Envoyer</Button>
-      </div>
-    </div>
+    </>
   )
 }
 

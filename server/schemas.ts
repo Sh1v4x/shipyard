@@ -560,6 +560,37 @@ export const ticketPlanSchema = {
   required: ['summary', 'steps', 'screenshots', 'risks', 'questions'],
 } as const
 
+export const precheckSchema = {
+  type: 'object',
+  properties: {
+    ...ticketPlanSchema.properties,
+    feasibility: {
+      type: 'object',
+      properties: {
+        verdict: { type: 'string', enum: ['faisable', 'réserves', 'bloqué'] },
+        details: s('Why, in 2 to 4 sentences, from what the code shows'),
+        blockers: { type: 'array', items: { type: 'string' }, description: 'What prevents starting; empty unless verdict is bloqué or réserves' },
+      },
+      required: ['verdict', 'details', 'blockers'],
+    },
+    estimate: {
+      type: 'object',
+      properties: {
+        size: { type: 'string', enum: ['XS', 'S', 'M', 'L', 'XL'] },
+        effort: s('Development time, review and tests included, as a range (e.g. "1 à 2 jours")'),
+        confidence: { type: 'string', enum: ['faible', 'moyenne', 'forte'] },
+        rationale: s('What drives the estimate: files touched, unknowns, tests, migrations'),
+      },
+      required: ['size', 'effort', 'confidence', 'rationale'],
+    },
+    findings: s('Markdown: what the code exploration established, with verified paths'),
+    type: { type: 'string', enum: ['feat', 'fix', 'chore', 'refactor'] },
+    branch: s('2 to 4 English words, kebab-case'),
+    repos: { type: 'array', items: { type: 'string' } },
+  },
+  required: [...ticketPlanSchema.required, 'feasibility', 'estimate', 'findings', 'type', 'branch', 'repos'],
+} as const
+
 export const branchAskSchema = {
   type: 'object',
   properties: {

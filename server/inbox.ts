@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
 import type {
-  ChecksAnalyzeOutput, CiAllOutput, CommentsOutput, ConflictResolveOutput, ManualTestOutput, FollowupOutput, InboxItem, InsightsOutput, PrReviewOutput, ReviewDecisions, ReviewOutput, TicketDraftOutput, TicketPlanOutput,
+  ChecksAnalyzeOutput, CiAllOutput, CommentsOutput, ConflictResolveOutput, ManualTestOutput, FollowupOutput, InboxItem, InsightsOutput, PrReviewOutput, ReviewDecisions, ReviewOutput, PrecheckOutput, TicketDraftOutput, TicketPlanOutput,
 } from '../shared/types.ts'
 import { runHref } from '../shared/inbox.ts'
 import { allRuns } from './lib/claude.ts'
@@ -78,6 +78,13 @@ async function awaiting(run: RunRecord, runs: RunRecord[], repo?: string): Promi
       const q = (out as TicketPlanOutput | null)?.questions.length ?? 0
       const answered = !!run.note && !!(out as TicketPlanOutput | null)?.reply
       return { title: answered ? 'Plan : réponse à ton message' : 'Plan prêt à valider', detail: q ? `${q} question(s) à trancher` : null, tone: 'blue', until: 'disparaît quand tu lances le travail' }
+    }
+    case 'precheck': {
+      if (run.decision) return null
+      const p = out as PrecheckOutput | null
+      const answered = !!run.note && !!p?.reply
+      const q = p?.questions.length ?? 0
+      return { title: answered ? 'Pre-check : réponse à ton message' : 'Pre-check prêt : à approuver', detail: p ? `${p.estimate.size} · ${p.estimate.effort}${q ? ` · ${q} question(s)` : ''}` : null, tone: p?.feasibility.verdict === 'bloqué' ? 'red' : 'blue', until: 'disparaît quand tu approuves' }
     }
     case 'ticket':
     case 'change':

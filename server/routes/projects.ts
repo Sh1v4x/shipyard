@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { CreatedTicket } from '../../shared/types.ts'
+import { approvePrecheck } from '../actions.ts'
 import { buildDigest } from '../lib/digest.ts'
 import { deleteBranches, listMyBranches } from '../lib/branches.ts'
 import { listWorktreeCleanup, removeWorktrees } from '../lib/worktreeCleanup.ts'
@@ -148,6 +149,10 @@ projectsRoutes.delete('/projects/:id/ghosts/:key', (c) => {
   removeGhost(getProject(c.req.param('id')).id, c.req.param('key'))
   return c.json({ ok: true })
 })
+
+/** Pre-check approuvé : branche, worktree(s) et travail lancé sur le plan du pre-check. */
+projectsRoutes.post('/projects/:id/precheck/:run/approve', async (c) =>
+  c.json(await approvePrecheck(getProject(c.req.param('id')), c.req.param('run'), await jsonBody(c, inputs.precheckApproveInput))))
 
 /** Worktrees d'un ticket créé depuis « Nouveau ticket », un par dépôt touché, liés entre eux. */
 projectsRoutes.post('/projects/:id/ticket-worktrees', async (c) =>

@@ -15,6 +15,7 @@ const WORKTREE_TAB: Partial<Record<ActionKind, string>> = {
 export function runHref(kind: ActionKind, scope: RunScope): string {
   if (kind === 'daily') return '#/daily'
   if (kind === 'ticket-draft') return `#/p/${scope.project}/ticket`
+  if (kind === 'precheck') return `#/p/${scope.project}/precheck${scope.ref ? `/${scope.ref}` : ''}`
   if (kind === 'insights') return `#/p/${scope.project}/insights${scope.ref ? `/${scope.ref}` : ''}`
   if (kind === 'branch-name') return `#/p/${scope.project}/new`
   if (scope.worktree) return `#/p/${scope.project}/wt/${scope.worktree}${WORKTREE_TAB[kind] ? `/${WORKTREE_TAB[kind]}` : ''}`

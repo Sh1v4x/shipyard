@@ -1,13 +1,13 @@
 
-import type { ActionInput, ActionKind, Project, Run } from '../shared/types.ts'
+import type { ActionInput, ActionKind, PrecheckOutput, Project, Run } from '../shared/types.ts'
 import { HttpError, getProject } from './lib/config.ts'
-import { cancelRun, getRun, listRuns, setRunDecision, waitForRun } from './lib/claude.ts'
+import { cancelRun, getRun, listRuns, setRunDecision, setRunInput, waitForRun } from './lib/claude.ts'
 import { run } from './lib/exec.ts'
 import * as git from './lib/git.ts'
 import { shotsDirOf } from './lib/runArtifacts.ts'
 import { revertRun } from './lib/snapshots.ts'
 import { rmSync } from 'node:fs'
-import { worktreeDetail, worktreePath } from './services.ts'
+import { createTicketWorktrees, worktreeDetail, worktreePath } from './services.ts'
 import { baseVars, type ProjectActions, type WorktreeActions } from './actions/context.ts'
 import { ciActions } from './actions/ci.ts'
 import { commentsActions } from './actions/comments.ts'
@@ -92,4 +92,36 @@ export async function abandonAgent(project: Project, wtId: string, ids: { plan?:
   }
   if (!needsAll) for (const id of runs) setRunDecision(id, 'declined')
   return { reverted, needsAll }
+}
+
+/** Ce que le pre-check a établi, donné au travail comme consigne : l'agent du worktree ne reprend pas sa session. */
+function precheckBrief(run: Run, out: PrecheckOutput): string {
+  return [
+    run.request?.trim() ? `The user's instructions for this ticket:\n${run.request.trim()}` : '',
+    'A pre-check already explored the code for this ticket and the user approved its plan. Rely on what it established (verify a path before reusing it), do not redo the whole exploration.',
+    `Feasibility: ${out.feasibility.verdict}. ${out.feasibility.details}`,
+    out.feasibility.blockers.length ? `Blockers raised (settled with the user unless the plan says otherwise):\n${out.feasibility.blockers.map((b) => `- ${b}`).join('\n')}` : '',
+    `Estimated size: ${out.estimate.size} (${out.estimate.effort}). ${out.estimate.rationale}`,
+    out.findings.trim() ? `What the pre-check found in the code:\n${out.findings.trim()}` : '',
+    out.questions.length ? `Questions left open (pick the reading closest to the ticket and say so in your audit):\n${out.questions.map((q) => `- ${q}`).join('\n')}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
+/**
+ * Approuve un pre-check : crée la branche et le worktree du ticket (un par dépôt choisi, liés entre eux), puis
+ * lance le travail dans celui du projet, sur le plan du pre-check et avec ce qu'il a établi.
+ */
+export async function approvePrecheck(project: Project, runId: string, input: { branch: string; projects: string[] }): Promise<{ project: string; worktree: string; run: string }> {
+  const run = getRun(runId)
+  if (run?.kind !== 'precheck' || run.scope.project !== project.id || !run.scope.ref) throw new HttpError(404, 'Pre-check introuvable')
+  const out = run.structured as PrecheckOutput | null
+  if (run.status !== 'success' || !out) throw new HttpError(409, 'Ce pre-check n’a pas abouti : relance-le avant d’approuver')
+  // Le travail démarre dans le projet du pre-check : il fait toujours partie des dépôts.
+  const created = await createTicketWorktrees(project, { ticketId: run.scope.ref, branch: input.branch, projects: [project.id, ...input.projects] })
+  const worktree = created.find((c) => c.project === project.id)!.id
+  const workInput: ActionInput = { project: project.id, worktree, planRunId: run.id, extra: precheckBrief(run, out) }
+  const work = await startAction('ticket', workInput)
+  setRunInput(work.id, workInput)
+  setRunDecision(run.id, 'approved')
+  return { project: project.id, worktree, run: work.id }
 }

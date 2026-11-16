@@ -746,3 +746,18 @@ export function useCreateTicketWorktrees(project: string) {
     onSettled: (_r, _e, tickets) => Promise.all([...new Set(tickets.flatMap((t) => t.projects))].map((p) => syncProject(qc, p))),
   })
 }
+
+/** Approuve un pre-check : branche et worktree(s) créés, travail lancé sur son plan. Renvoie le worktree où suivre le travail. */
+export function useApprovePrecheck(project: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ run, branch, projects }: { run: string; branch: string; projects: string[] }) =>
+      api<{ project: string; worktree: string; run: string }>(`/projects/${project}/precheck/${run}/approve`, { body: { branch, projects } }),
+    // Même en échec, des worktrees ont pu être créés avant l'erreur.
+    onSettled: async (r, _e, { run, projects }) => {
+      // Le run terminé est gardé en cache (voir useRun) : sa décision y est reportée.
+      if (r) qc.setQueryData<Run>(qk.run(run), (prev) => prev && { ...prev, decision: 'approved' })
+      await Promise.all([qc.invalidateQueries({ queryKey: qk.runs() }), ...[...new Set([project, ...projects])].map((p) => syncProject(qc, p))])
+    },
+  })
+}

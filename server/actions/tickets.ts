@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
-import type { BranchAskOutput, Run, InsightsMode, TicketDraftOutput, TicketPlanOutput, TicketWorkOutput } from '../../shared/types.ts'
+import type { BranchAskOutput, Run, InsightsMode, PrecheckOutput, TicketDraftOutput, TicketPlanOutput, TicketWorkOutput } from '../../shared/types.ts'
 import { HttpError, loadProjects } from '../lib/config.ts'
 import { getRun, listRuns, setRunDecision, startRun } from '../lib/claude.ts'
 import { run } from '../lib/exec.ts'
@@ -14,6 +14,7 @@ import { DIGESTS_DIR, buildDigest } from '../lib/digest.ts'
 import { type ProjectActions, type WorktreeAction, type WorktreeActions, branchContext, captureContext, linkedContext, specFrom, ticketCommentsText } from './context.ts'
 import { createCheckout, releaseCheckout } from './checkouts.ts'
 import { shotsDirOf } from '../lib/runArtifacts.ts'
+import { ticketIdFrom } from '../../shared/text.ts'
 
 /** Ce que demande chaque mode de « Features & optimisations ». */
 const INSIGHTS_MODE: Record<InsightsMode, string> = {
@@ -81,11 +82,12 @@ async function planAction({ kind, input, d, scope, cwd, vars }: WorktreeAction):
 async function workAction({ kind, input, project, d, scope, cwd, vars }: WorktreeAction): Promise<Run> {
   // Un correctif demandé depuis l'onglet Tests n'a pas de plan à lui : il reprend le dernier plan du worktree,
   // sinon sa consigne fait office de plan.
-  const planId = input.planRunId ?? (input.extra?.trim() ? lastPlanId(scope) : null)
+  // Des corrections ou un re-test gardent le plan du passage qu'ils reprennent (ex. celui d'un pre-check, hors du worktree).
+  const previous = input.resumeFrom ? getRun(input.resumeFrom) : null
+  const planId = input.planRunId ?? previous?.scope.ref ?? (input.extra?.trim() ? lastPlanId(scope) : null)
   const planRun = planId ? getRun(planId) : null
   const plan = (planRun?.structured as TicketPlanOutput | null) ?? (input.extra?.trim() ? requestPlan(input.extra.trim()) : null)
   if (!plan) throw new HttpError(400, 'Approuve d’abord un plan')
-  const previous = input.resumeFrom ? getRun(input.resumeFrom) : null
   const feedback = input.feedback?.trim()
   const id = randomUUID()
   const shotsDir = shotsDirOf(id)
@@ -234,6 +236,58 @@ export const ticketsProjectActions: ProjectActions = {
       }, {
         kind, title: { features: 'Idées de features', improve: 'Axes d’amélioration', review: 'Analyse du projet' }[mode], scope: { project: project.id, ref: mode }, cwd: project.path,
         schema: schemas.insightsSchema, addDirs: [DIGESTS_DIR, ...grouped.map((p) => p.path)], request: input.extra?.trim() || null,
+      }),
+    )
+  },
+  /**
+   * Pre-check d'un ticket, avant tout worktree : l'agent lit le ticket et le code du projet (lecture seule), juge la
+   * faisabilité, estime la charge et propose un plan. Les échanges reprennent sa session ; l'approbation
+   * (approvePrecheck) crée la branche et le worktree, puis lance le travail sur ce plan.
+   */
+  precheck: async ({ kind, input, project }) => {
+    const { linearConfigured, ticketById, ticketComments } = await import('../lib/linear.ts')
+    if (!linearConfigured()) throw new HttpError(400, 'Linear n’est pas connecté (Réglages › Connexions)')
+    const id = ticketIdFrom(input.ticketId ?? '')
+    if (!id) throw new HttpError(400, 'Donne l’URL du ticket Linear, ou son identifiant (ex. ENG-142)')
+    const t = await ticketById(id)
+    if (!t) throw new HttpError(404, `Ticket introuvable dans Linear : ${id}`)
+    const prev = input.previousRunId ? getRun(input.previousRunId) : null
+    const prevOut = prev?.structured as PrecheckOutput | null
+    const feedback = input.feedback?.trim()
+    // Lors d'un échange, la consigne d'origine vient du pre-check précédent (l'écran ne la garde pas).
+    const request = input.extra?.trim() || (feedback ? prev?.request?.trim() : '') || ''
+    const comments = await ticketComments(id).catch(() => [])
+    const date = (iso: string) => new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
+    const grouped = groupedProjects(project).filter((p) => existsSync(p.path))
+    return startRun(
+      specFrom('precheck', {
+        'project.name': project.name,
+        repo: project.repo,
+        base: project.baseBranch,
+        'ticket.id': t.id,
+        'ticket.title': t.title,
+        'ticket.description': t.description || '(no description)',
+        'ticket.url': t.url,
+        'ticket.type': t.type,
+        'ticket.comments': comments.length
+          ? ['Ticket comments: clarifications added after the description. In case of contradiction, the most recent one wins over the description.', ...comments.map((c) => `- ${c.author}, ${date(c.createdAt)}:\n  ${c.body.slice(0, 3000).replace(/\n/g, '\n  ')}`)].join('\n')
+          : '',
+        consigne: request || 'none',
+        previous: prevOut && feedback ? `## Previous pre-check\n\nFeasibility: ${prevOut.feasibility.verdict}. ${prevOut.feasibility.details}\nEstimate: ${prevOut.estimate.size}, ${prevOut.estimate.effort} (confidence: ${prevOut.estimate.confidence}).\n\nPlan:\n${formatPlan(prevOut)}${prevOut.questions.length ? `\n\nQuestions you asked:\n${prevOut.questions.map((q) => `- ${q}`).join('\n')}` : ''}` : '',
+        feedback: feedback ? `## The user's message about this pre-check\n\n${feedback}` : '',
+        linked: grouped.length ? [
+          '## Linked repositories',
+          `${project.name} is grouped with other repositories: a ticket often spans several of them (e.g. API and SDK on one side, screens on the other). Explore them like the main repository, by absolute path:`,
+          grouped.map((p) => `- ${p.name} (${p.repo}): ${p.path}`).join('\n'),
+          'In the plan, each step says which repository it happens in, and files outside the current directory are given with their repository name as prefix. List in repos every repository the ticket changes: a worktree is created in each, on the same branch.',
+        ].join('\n\n') : '',
+        repos: [project, ...grouped].map((p) => p.name).join(', '),
+        rules: rulesFor(project.id),
+      }, {
+        kind, title: feedback ? `Échange sur le pre-check · ${t.id}` : `Pre-check · ${t.id}`, scope: { project: project.id, ref: t.id }, cwd: project.path,
+        schema: schemas.precheckSchema, addDirs: grouped.map((p) => p.path), note: feedback ?? null, request: request || null,
+        // En échange, on reprend la session : l'agent a déjà exploré le code.
+        resume: feedback ? prev?.sessionId : null,
       }),
     )
   },

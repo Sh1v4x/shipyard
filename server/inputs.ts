@@ -51,6 +51,9 @@ const checkItem = z.object({
   verdict: z.enum(['fix', 'ignore', 'manual', 'ask']),
   reason: z.string(),
   fix: z.string(),
+  // Absents des analyses faites avant l'aperçu avant/après.
+  before: z.string().nullable().default(null),
+  after: z.string().nullable().default(null),
 }) satisfies z.ZodType<CheckItem>
 
 const insightItem = z.object({

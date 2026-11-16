@@ -16,23 +16,38 @@ async function checksAction({ kind, input, project, d, scope, cwd, needPr, vars 
   const report = (await checkReports(project.repo, pr.number, true)).find((r) => r.id === input.report)
   if (!report) throw new HttpError(404, `Rapport « ${input.report} » introuvable sur la PR`)
   const runScope = { ...scope, pr: pr.number, ref: report.id }
+  // L'analyse de ce rapport dont on reprend la session : l'agent a déjà lu les règles et le code.
+  const prev = input.previousRunId ? getRun(input.previousRunId) : null
+  const session = prev?.kind === 'checks-analyze' && prev.scope.worktree === scope.worktree && prev.scope.ref === report.id ? prev.sessionId : null
   if (kind === 'checks-analyze') {
-    const local = report.command ? await runReportCommand(report.command, cwd) : null
+    // Mon message sur l'analyse : l'agent la révise dans sa session, sans relancer le rapport qu'il a déjà.
+    const feedback = input.feedback?.trim() || null
+    const exchange = feedback && session ? session : null
+    const local = !exchange && report.command ? await runReportCommand(report.command, cwd) : null
+    const output = exchange
+      ? '(unchanged: reuse the detailed report you already have, and rerun the command yourself if you need it fresh)'
+      : local ? `${local.ok ? '' : 'The command failed. Output:\n'}\`\`\`\n${local.output || '(empty)'}\n\`\`\`` : '(no detailed report: work with the posted report)'
     return startRun(
       specFrom(kind, {
         ...vars, 'report.title': report.title, 'report.body': report.body, 'report.command': report.command ?? 'none: the posted report is complete',
-        'report.output': local ? `${local.ok ? '' : 'The command failed. Output:\n'}\`\`\`\n${local.output || '(empty)'}\n\`\`\`` : '(no detailed report: work with the posted report)',
-      }, { kind, title: `Contrôle · ${report.title}`, scope: runScope, cwd, schema: schemas.checksAnalyzeSchema }),
+        'report.output': output,
+        feedback: feedback ? `## The user's message about your analysis\n\n${feedback}\n\nRevise your analysis accordingly: answer the message in summary, then return the complete list of items again (not only the ones that change), keeping the id of every item you keep. Reread the code if the message questions what you understood.` : '',
+      }, {
+        kind, title: feedback ? `Échange sur le contrôle · ${report.title}` : `Contrôle · ${report.title}`, scope: runScope, cwd, schema: schemas.checksAnalyzeSchema,
+        note: feedback, resume: exchange,
+      }),
     )
   }
   const items = input.checkItems ?? []
   if (!items.length) throw new HttpError(400, 'Choisis au moins un problème à corriger')
+  const code = (label: string, text: string | null) => (text ? `\n  ${label}:\n${text.split('\n').map((l) => `      ${l}`).join('\n')}` : '')
   return startRun(
     specFrom(kind, {
       ...vars, 'report.title': report.title, 'report.command': report.command ?? 'none',
-      items: items.map((i) => `- [${i.source}] ${i.file ? `${i.file}${i.line ? `:${i.line}` : ''}: ` : ''}${i.problem}\n  ${i.verdict === 'ask' ? 'Exception approved by the user' : 'Fix'}: ${i.fix}`).join('\n'),
+      items: items.map((i) => `- [${i.source}] ${i.file ? `${i.file}${i.line ? `:${i.line}` : ''}: ` : ''}${i.problem}\n  ${i.verdict === 'ask' ? 'Exception approved by the user' : 'Fix'}: ${i.fix}${code('Before', i.before)}${code('After', i.after)}`).join('\n'),
+      session: session ? 'You made the analysis above in this conversation: you already read the rules, the code and its callers. Use it, reread only the files that changed since.' : '',
     }, {
-      kind, title: `Corriger · ${report.title}`, scope: runScope, cwd, schema: schemas.fixSchema,
+      kind, title: `Corriger · ${report.title}`, scope: runScope, cwd, schema: schemas.fixSchema, resume: session,
       onSuccess: async (run) => {
         const out = run.structured as FixOutput
         if (!out.changed) return

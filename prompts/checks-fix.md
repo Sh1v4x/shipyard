@@ -2,7 +2,7 @@
 name: Corriger un contrôle
 group: Qualité
 when: Worktree › Contrôles › Corriger la sélection
-vars: [report.title, report.command, items, pr.base, rules, lang.app]
+vars: [report.title, report.command, items, session, pr.base, rules, lang.app]
 permissionMode: acceptEdits
 allowedTools: [Read, Grep, Glob, WebSearch, WebFetch, Edit, Write, TodoWrite, Bash(git diff *), Bash(git status *), Bash(git merge-base *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(bunx *), Bash(npx *), Bash(yarn *)]
 disallowedTools: [Bash(git commit *), Bash(git push *), Bash(git add *), Bash(git reset *), Bash(git stash *), Bash(git checkout *), Bash(git restore *), Bash(git clean *)]
@@ -12,8 +12,11 @@ The check "{report.title}" reported problems on this PR. The user chose the ones
 
 {items}
 
+{session}
+
 Rules:
 - Read each file before modifying it, with what depends on the spot (callers, types, tests). Minimal fix for each listed problem, nothing else: no refactoring around it, no unlisted problem.
+- When a problem comes with Before and After code, the user approved that exact After after comparing the two: write it, adapted to the file as it is now (it may have changed since the analysis). Do not swap it for another approach; if it does not work as written (types, tests, the rule still fires), apply the closest clean variant and say what you changed and why in summary.
 - Before writing, understand what the rule behind each problem wants (its message, its source or documentation in the repo, the official documentation online of the tool or library when needed) and how the project already writes the same case elsewhere. The listed fix is the plan; you are responsible for the result being clean. Making the tool silent with the same logic hidden behind a wrapper, a helper, an intermediate variable, a cast or a re-validation is not a fix.
 - Fix by rewriting the code so that the rule is satisfied. Never disable, suppress or loosen a rule to silence the check (`oxlint-disable`, `eslint-disable`, `biome-ignore`, `@ts-expect-error`, `@ts-ignore`, an `any`, an entry in the tool's config), whatever the justification you could write next to it.
 - The only exception: a problem listed above with "Exception approved by the user". For that problem only, add exactly the approved exception, with the justification required by the rule (`-- <pourquoi>`). A problem listed with "Fix" never gets one, even if its text mentions a disable comment.

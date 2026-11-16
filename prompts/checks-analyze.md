@@ -2,7 +2,7 @@
 name: Analyser un contrôle
 group: Qualité
 when: Worktree › Contrôles › Analyser
-vars: [pr.number, pr.title, pr.base, worktree.path, report.title, report.body, report.command, report.output, rules, lang.app]
+vars: [pr.number, pr.title, pr.base, worktree.path, report.title, report.body, report.command, report.output, feedback, rules, lang.app]
 model: sonnet
 allowedTools: [Read, Grep, Glob, WebSearch, WebFetch, Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git merge-base *), Bash(bun *), Bash(bunx *), Bash(pnpm *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(yarn *), Bash(ls *)]
 disallowedTools: [Edit, Write, NotebookEdit, Bash(git commit *), Bash(git push *), Bash(git reset *), Bash(git checkout *), Bash(git restore *), Bash(git clean *), Bash(git stash *)]
@@ -19,6 +19,8 @@ An automated check commented on PR #{pr.number} ({pr.title}), in the worktree {w
 Command: {report.command}
 
 {report.output}
+
+{feedback}
 
 ## What blocks the PR
 
@@ -40,7 +42,13 @@ Only the Oxlint findings on lines added by the PR ("Oxlint (added lines)" sectio
      - ask: you see no way of writing the code that satisfies the rule without breaking the behavior, or you are unsure the finding is legitimate (possible false positive). The only thing left would be an exception (`oxlint-disable-next-line … -- <pourquoi>`, `eslint-disable`, `biome-ignore`, `@ts-expect-error`, an entry in the tool's config). You never decide that yourself: the user does;
      - manual: the fix is outside the repo (secret or variable to create on the deployed environment, service configuration);
    - reason: why this verdict, in one sentence. For ask: what you found in the code, the rewrites you considered and why each one fails, in a few sentences, so that the user can judge without opening the file;
-   - fix: the concrete fix (file, what changes), for manual the action to take and where, or for ask the exact exception you would add (comment and its justification).
+   - fix: the concrete fix (file, what changes), for manual the action to take and where, or for ask the exact exception you would add (comment and its justification);
+   - before and after: the code the user will compare side by side to approve the fix, for every fix and ask verdict that changes code:
+     - before: the passage as it is in the file today, copied exactly (same indentation), with the few surrounding lines needed to understand it; just the passage, never the whole file;
+     - after: the same passage once your fix is applied, complete and ready to be written as is, covering the same lines as before so that the two compare. For ask, after shows the exception in place;
+     - when the fix touches several places (a type at the boundary and the code that reads it), show each one in both blocks, separated by a comment line naming the file (`// path/to/file.ts`), in the same order;
+     - write after for real: check that it type-checks in your head against the types you read, and that it satisfies the rule. It is the code that will be applied;
+     - null for both when nothing changes in the code (ignore, manual).
 4. A fix removes the cause, it does not move the symptom. For each fix verdict, say in fix which construct replaces which, precisely enough to be applied as is, and make sure that:
    - it is what the rule wants: the value gets its real type at the boundary where it enters (typed client, schema already used by the project, type guard), the missing case is handled where it matters, the unknown parameter gets a precise type. Not the same logic hidden from the tool behind a wrapper, a helper, an intermediate variable, a cast, a re-validation or another indirection;
    - it is proportionate: the smallest change that makes the code right. Ten findings do not justify new machinery; if several findings share one cause (the same untyped value read in several places), fix that cause once and say so;
@@ -58,6 +66,6 @@ They apply to the fixes you propose. A rule only applies to the areas it names.
 
 StructuredOutput:
 - summary: 1 to 3 sentences. Start with whether the PR is blocked (how many Oxlint findings on added lines), then what else deserves fixing, then how many problems await the user's decision (ask), if any.
-- items: id (short and stable, e.g. `oxlint-no-unused-vars-foo.ts`), source (tool or report section), file (relative path or null), line (or null), problem, introduced, blocking, verdict, reason, fix.
+- items: id (short and stable, e.g. `oxlint-no-unused-vars-foo.ts`), source (tool or report section), file (relative path or null), line (or null), problem, introduced, blocking, verdict, reason, fix, before, after.
 
 Write all text fields of your output in {lang.app} (keep technical terms in English).

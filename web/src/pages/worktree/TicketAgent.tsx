@@ -101,11 +101,12 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
     setRestart(false)
     return plan.start({ extra, feedback, previousRunId: feedback ? plan.id : undefined })
   }
-  const canRestart = !!plan.id && !decided && !plan.busy && !workRunning && !restart
   // Travail lancé sans plan (« Tout traiter » depuis l'analyse du projet) : sa consigne fait office de plan pour les corrections.
   const workExtra = extra || work.run?.input?.extra || ''
   // Travail lancé sans plan et pas encore tranché : son compte rendu remplace le formulaire du plan.
   const directWork = !plan.id && workIsCurrent && !decided
+  // Repartir d'une demande neuve sans rien annuler : aussi après un travail lancé sans plan, qui n'a pas de plan à remplacer.
+  const canRestart = (!!plan.id || directWork) && !decided && !plan.busy && !workRunning && !restart
 
   return (
     <article className="flex min-w-0 flex-[1.4_1_420px] flex-col gap-4 rounded-xl border bg-card p-5">
@@ -115,7 +116,7 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
           {mode === 'change' && <p className="mt-0.5 text-sm text-muted-foreground">{WAYS.find((x) => x.key === way)!.help}</p>}
         </div>
         <span className="flex flex-wrap items-center gap-1">
-          {canRestart && <Button variant="outline" size="sm" onClick={() => setRestart(true)}><PlusIcon />Nouveau plan</Button>}
+          {canRestart && <Button variant="outline" size="sm" onClick={() => setRestart(true)}><PlusIcon />{mode === 'change' ? 'Nouvelle modification' : 'Nouveau plan'}</Button>}
           {canAbandon && (
             <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={abandon.isPending} onClick={doAbandon}>
               {abandon.isPending ? <Spinner /> : <Trash2Icon />}Abandonner
@@ -173,8 +174,8 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
                   {work.busy ? <Spinner /> : <WrenchIcon />}Développer directement
                 </Button>
               )}
-              {restart && <Button size="sm" variant="ghost" onClick={() => setRestart(false)}>Revenir au plan actuel</Button>}
-              <span className="text-sm text-muted-foreground">{restart ? 'Le plan actuel sera remplacé par un plan neuf, à partir de cette consigne.' : ticket && !plan.id ? 'Avec un plan, rien n’est modifié tant que tu ne l’as pas approuvé. Directement, rien n’est commité avant ton accord.' : 'Rien n’est modifié tant que tu n’as pas approuvé le plan.'}</span>
+              {restart && <Button size="sm" variant="ghost" onClick={() => setRestart(false)}>{directWork ? 'Revenir au travail actuel' : 'Revenir au plan actuel'}</Button>}
+              <span className="text-sm text-muted-foreground">{restart ? directWork ? 'Le travail affiché laisse la place à un plan neuf, à partir de cette consigne. Les fichiers ne sont pas touchés.' : 'Le plan actuel sera remplacé par un plan neuf, à partir de cette consigne.' : ticket && !plan.id ? 'Avec un plan, rien n’est modifié tant que tu ne l’as pas approuvé. Directement, rien n’est commité avant ton accord.' : 'Rien n’est modifié tant que tu n’as pas approuvé le plan.'}</span>
             </div>
           </div>
         )}

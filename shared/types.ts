@@ -1110,6 +1110,10 @@ export interface CheckItem {
   verdict: 'fix' | 'ignore' | 'manual' | 'ask'
   reason: string
   fix: string
+  /** Le code actuel concerné par la correction, tel qu'il est dans le fichier ; null sans changement de code. */
+  before: string | null
+  /** Le même passage une fois corrigé (ou avec l'exception proposée pour ask) ; null sans changement de code. */
+  after: string | null
 }
 
 export interface ChecksAnalyzeOutput {

@@ -1,8 +1,9 @@
-import { ArrowUpRightIcon, ChevronRightIcon, OctagonAlertIcon, ClipboardCopyIcon, RefreshCwIcon, SparklesIcon, WrenchIcon } from 'lucide-react'
+import { ArrowRightIcon, ArrowUpRightIcon, ChevronRightIcon, OctagonAlertIcon, ClipboardCopyIcon, MessageSquareIcon, RefreshCwIcon, SendIcon, SparklesIcon, WrenchIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type { CheckItem, CheckReport, ChecksAnalyzeOutput, FixOutput } from '../../../../shared/types.ts'
 import { useRefreshProject } from '../../data/mutations.ts'
@@ -55,6 +56,15 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
   const selected = out?.items.filter((i) => picked.includes(i.id)) ?? []
   const [label, tone] = r.blocking == null ? STATUS[r.status] : GATE[r.blocking > 0 ? 'fail' : 'pass']
 
+  // Mon message à l'agent qui a fait l'analyse : il la révise dans sa session, avec tout ce qu'il a déjà lu.
+  const [message, setMessage] = useState('')
+  const send = async () => {
+    const feedback = message.trim()
+    if (!feedback || !analysis.id) return
+    if (await analysis.start({ report: r.id, feedback, previousRunId: analysis.id })) setMessage('')
+  }
+  const where = (i: CheckItem) => (i.file ? `${i.file}${i.line ? `:${i.line}` : ''}` : i.source)
+
   const copy = () =>
     navigator.clipboard.writeText(selected.map((i) => `${i.source}${i.file ? ` · ${i.file}${i.line ? `:${i.line}` : ''}` : ''} : ${i.problem}\nCorrection : ${i.fix}`).join('\n\n'))
       .then(() => toast('Copié : à coller dans ta review'))
@@ -106,9 +116,10 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
               {out.items.length > 0 && (
                 <div className="overflow-hidden rounded-lg border">
                   {out.items.map((i) => (
-                    <label key={i.id} className="flex cursor-pointer gap-3 border-t px-4 py-3 first:border-t-0">
-                      <Checkbox className="mt-0.5" checked={picked.includes(i.id)} onCheckedChange={(v) => setPicked((p) => (v === true ? [...p, i.id] : p.filter((x) => x !== i.id)))} />
-                      <span className={cn('min-w-0 flex-1', i.verdict === 'ignore' && !picked.includes(i.id) && 'opacity-70')}>
+                    <div key={i.id} className="flex gap-3 border-t px-4 py-3 first:border-t-0">
+                      <Checkbox id={`check-${r.id}-${i.id}`} className="mt-0.5" checked={picked.includes(i.id)} onCheckedChange={(v) => setPicked((p) => (v === true ? [...p, i.id] : p.filter((x) => x !== i.id)))} />
+                      <div className={cn('min-w-0 flex-1', i.verdict === 'ignore' && !picked.includes(i.id) && 'opacity-70')}>
+                        <label htmlFor={`check-${r.id}-${i.id}`} className="block cursor-pointer">
                         <span className="flex flex-wrap items-center gap-1.5">
                           {i.blocking && <Badge tone="red">Bloque la PR</Badge>}
                           <Badge tone={VERDICT[i.verdict][1]}>{VERDICT[i.verdict][0]}</Badge>
@@ -119,9 +130,33 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
                         <span className="mt-1.5 block text-sm font-medium">{i.problem}</span>
                         <span className="mt-1 block text-sm text-muted-foreground">{i.reason}</span>
                         <span className="mt-1 block text-sm"><span className="font-medium">{FIX_LABEL[i.verdict] ?? 'Correction : '}</span>{i.fix}</span>
-                      </span>
-                    </label>
+                        </label>
+                        {/* Hors du label de la case : sélectionner du code ne doit pas la cocher. */}
+                        {(i.before || i.after) && (
+                          <span className="mt-2 grid items-stretch gap-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+                            <CodeBlock title="Avant" code={i.before} tone="red" />
+                            <ArrowRightIcon className="hidden size-4 self-center text-muted-foreground lg:block" aria-hidden />
+                            <CodeBlock title="Après" code={i.after} tone="green" />
+                          </span>
+                        )}
+                        {mine && (
+                          <Button variant="ghost" size="sm" className="mt-1.5 -ml-2 text-muted-foreground"
+                            onClick={() => { setMessage((m) => `${m.trim() ? `${m.trimEnd()}\n` : ''}${where(i)} : `); document.getElementById(`checks-message-${r.id}`)?.focus() }}>
+                            <MessageSquareIcon />Demander une autre approche
+                          </Button>
+                        )}
+                      </div>
+                    </div>
                   ))}
+                </div>
+              )}
+              {mine && (
+                <div className="flex flex-col gap-2">
+                  <label htmlFor={`checks-message-${r.id}`} className="text-sm font-medium">Échanger avec l’agent de l’analyse <span className="font-normal text-muted-foreground">(demande une autre approche, pose une question : il révise ses corrections avec tout ce qu’il a déjà lu)</span></label>
+                  <Textarea id={`checks-message-${r.id}`} rows={3} value={message} onChange={(e) => setMessage(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void send() }}
+                    placeholder="Ex. : vehicles.utils.ts:69 : pas de schéma zod ici, type la réponse dans le client RegCheck · pourquoi cette règle se déclenche sur le catch ?" />
+                  <div><Button variant="outline" size="sm" disabled={!message.trim() || analysis.busy} onClick={() => void send()} title="⌘ + Entrée"><SendIcon />Envoyer à l’agent</Button></div>
                 </div>
               )}
               {out.items.length > 0 && (
@@ -129,7 +164,7 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
                   <SectionLabel className="mb-0">{plural(selected.length, 'problème choisi', 'problèmes choisis')}</SectionLabel>
                   {mine ? (
                     <Button size="sm" disabled={!selected.length || fix.busy || selected.some((i) => i.verdict === 'manual')} title={selected.some((i) => i.verdict === 'manual') ? 'Une action hors du dépôt ne se corrige pas dans le code : décoche-la' : undefined}
-                      onClick={() => fix.start({ report: r.id, checkItems: selected })}>
+                      onClick={() => fix.start({ report: r.id, checkItems: selected, previousRunId: analysis.id ?? undefined })}>
                       {fix.busy ? <Spinner /> : <WrenchIcon />}Corriger la sélection et pousser
                     </Button>
                   ) : (
@@ -144,5 +179,15 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
         </div>
       )}
     </article>
+  )
+}
+
+/** Un extrait de code de la correction proposée : l'état actuel, ou ce qu'il deviendra. */
+function CodeBlock({ title, code, tone }: { title: string; code: string | null | undefined; tone: 'red' | 'green' }) {
+  return (
+    <span className={cn('flex min-w-0 flex-col overflow-hidden rounded-md border', tone === 'red' ? 'border-red-500/25' : 'border-emerald-500/25')}>
+      <span className={cn('px-3 py-1 text-xs font-medium', tone === 'red' ? 'bg-red-500/10 text-red-700 dark:text-red-300' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300')}>{title}</span>
+      <code className="block max-h-96 flex-1 cursor-text overflow-auto bg-muted/40 p-3 font-mono text-xs leading-relaxed whitespace-pre select-text">{code || '(rien)'}</code>
+    </span>
   )
 }

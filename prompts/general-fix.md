@@ -2,9 +2,9 @@
 name: Appliquer un commentaire général à toute la PR
 group: Ma PR
 when: Worktree › Commentaires › Commentaires généraux › Appliquer à toute la PR
-vars: [comment.author, comment.body, files, pr.base, linked, lang.app]
+vars: [comment.author, comment.body, files, pr.base, linked, rules, lang.app]
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(git show *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *), Bash(git -C * diff*), Bash(git -C * status*), Bash(git -C * log*)]
+allowedTools: [Read, Grep, Glob, WebSearch, WebFetch, Edit, Write, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(git show *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *), Bash(git -C * diff*), Bash(git -C * status*), Bash(git -C * log*)]
 ---
 
 {comment.author} left this general comment on the PR (attached to no line):
@@ -24,7 +24,12 @@ Rules:
 - Surgical: exactly what the remark asks, the same way everywhere, without refactoring around it or adding comments.
 - If the remark is ambiguous, apply its most literal reading, and say how you read it in summary.
 - Run the relevant lint or typecheck if the project has one.
+- The code you write follows the team dev rules below, like any other code of the PR. Surgical does not mean dirty: a fix that satisfies the reviewer but breaks one of these rules is not acceptable. If the fix you were given cannot be applied without breaking one, apply the clean variant and say so in summary; if there is none, change nothing and explain why.
 - If every spot already follows the remark, change nothing.
+
+### Team dev rules
+
+{rules}
 
 StructuredOutput:
 - changed: true if files were modified.

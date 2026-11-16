@@ -33,6 +33,8 @@ export function baseVars(d: WorktreeDetail): Record<string, string | number | nu
     'pr.title': d.pr?.title ?? '',
     'pr.author': d.pr?.author ?? '',
     'pr.base': d.pr?.base ?? d.project.baseBranch,
+    // Règles de dev du projet : tout prompt qui écrit ou propose du code peut les citer avec {rules}.
+    rules: rulesFor(d.project.id),
   }
 }
 

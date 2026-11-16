@@ -2,9 +2,9 @@
 name: Analyse des commentaires
 group: Ma PR
 when: Worktree › Commentaires › Analyser les commentaires
-vars: [pr.number, pr.title, ticket.id, context, general, linked, lang.app, lang.github]
+vars: [pr.number, pr.title, ticket.id, context, general, linked, rules, lang.app, lang.github]
 model: sonnet
-allowedTools: [Read, Grep, Glob, Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git -C * diff*), Bash(git -C * log*)]
+allowedTools: [Read, Grep, Glob, WebSearch, WebFetch, Bash(git diff *), Bash(git log *), Bash(git show *), Bash(git -C * diff*), Bash(git -C * log*)]
 ---
 
 Here are the unresolved comments left on my PR #{pr.number} ({pr.title}). Linked ticket: {ticket.id}.
@@ -15,7 +15,7 @@ For each discussion thread:
    - verdict fix: the reviewer is right and a code change is needed;
    - verdict skip: the remark doesn't apply, is already handled elsewhere, or concerns a deliberate choice.
 3. audit: your reasoning in 2 to 3 sentences, with the code elements that justify it.
-4. action: what will concretely be done (the precise fix, or "ne rien changer").
+4. action: what will concretely be done (the precise fix, or "ne rien changer"). The fix you describe is the one that will be applied as is: it must follow the team dev rules below and fix the cause the reviewer points at, not hide it. If the remark is about a library, a framework or a tool behavior you are not sure of, check its official documentation (WebSearch, WebFetch) before deciding.
 5. reply: the reply to post on the thread.
    - If fix: leave reply empty, Shipyard will reply "DONE" with the commit link.
    - If skip: a short, polite, reasoned reply, in {lang.github}, addressed to the reviewer.
@@ -30,3 +30,7 @@ Copy the provided threadId exactly for each thread. Do not modify any file. Retu
 {general}
 
 {linked}
+
+### Team dev rules
+
+{rules}

@@ -2,9 +2,9 @@
 name: Corriger tous les commentaires
 group: Ma PR
 when: Worktree › Commentaires › Tout accepter
-vars: [comments, general, linked, lang.app]
+vars: [comments, general, linked, rules, lang.app]
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, TodoWrite, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(git show *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *), Bash(git -C * diff*), Bash(git -C * status*), Bash(git -C * log*)]
+allowedTools: [Read, Grep, Glob, WebSearch, WebFetch, Edit, Write, TodoWrite, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(git show *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *), Bash(git -C * diff*), Bash(git -C * status*), Bash(git -C * log*)]
 disallowedTools: [Bash(git commit *), Bash(git push *), Bash(git add *), Bash(git reset *), Bash(git stash *), Bash(git checkout *), Bash(git restore *), Bash(git clean *)]
 ---
 
@@ -21,9 +21,14 @@ Rules:
 - Surgical fix for each comment: exactly what was approved, without refactoring around it or adding comments.
 - If a fix touches a shared export, update its usages.
 - Two fixes touching the same place: do them together, consistently.
+- The code you write follows the team dev rules below, like any other code of the PR. Surgical does not mean dirty: a fix that satisfies the reviewer but breaks one of these rules is not acceptable. If the fix you were given cannot be applied without breaking one, apply the clean variant and say so in summary; if there is none, set that comment to failed and explain why.
 - A fix may already be in the code, brought by a previous commit on the branch. Check this before modifying: if so, change nothing and find the commit (`git log -p -- <fichier>`, `git log -S'<extrait>'`).
 - At the end, run the project's lint and typecheck once on the touched files, and fix what you broke.
 - Don't commit or push: Shipyard makes a single commit for the whole set, then replies "DONE" on each fixed thread.
+
+### Team dev rules
+
+{rules}
 
 StructuredOutput:
 - commitTitle: a single commit title in English for the whole set, format `fix(<scope>): <description>` (e.g. `fix(api): address review comments`), title only, no mention of AI.

@@ -2,9 +2,9 @@
 name: Corriger un job CI
 group: Qualité
 when: Worktree › CI › Appliquer le correctif
-vars: [job.name, ci.cause, ci.fix, lang.app]
+vars: [job.name, ci.cause, ci.fix, rules, lang.app]
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git diff *), Bash(git status *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *)]
+allowedTools: [Read, Grep, Glob, WebSearch, WebFetch, Edit, Write, Bash(git diff *), Bash(git status *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *)]
 ---
 
 The CI job "{job.name}" is failing.
@@ -16,10 +16,15 @@ Rules:
 - Read the files before modifying them.
 - Minimal fix, only what makes the job pass.
 - Never disable a test, a lint rule or a CI step to make it pass.
+- The code you write follows the team dev rules below, like any other code of the PR. Surgical does not mean dirty: a fix that satisfies the job but breaks one of these rules is not acceptable. If the fix you were given cannot be applied without breaking one, apply the clean variant and say so in summary; if there is none, change nothing and explain why.
 - A job that needs a database (migrations, integration tests) is reproduced with what the repository already provides (its docker-compose service, its test global setup or the Postgres already running on the workstation), never with a container started from a script of your own. Any command that can hang (container, install, long test) runs in the foreground with a time limit (`timeout 300 …`); if it exceeds it, stop it and move on: say in summary what could not be checked.
 - Reproduce the check locally if possible (lint, typecheck, targeted test, .env check script).
 - A lock file out of sync with its manifest (package-lock.json, pnpm-lock.yaml, bun.lock, yarn.lock) is regenerated with the repository's own package manager (`npm install`, `pnpm install`…), never edited by hand, then checked with the CI's command (`npm ci`, `pnpm install --frozen-lockfile`…).
 - If a command you need is refused, say exactly which one in summary: changed stays false.
+
+### Team dev rules
+
+{rules}
 
 StructuredOutput:
 - changed: true if files were modified.

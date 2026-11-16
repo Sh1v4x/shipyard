@@ -1103,8 +1103,11 @@ export interface CheckItem {
   introduced: boolean
   /** Problème Oxlint sur une ligne ajoutée : il bloque la PR tant qu'il n'est pas corrigé. */
   blocking: boolean
-  /** fix : se corrige dans le code ; ignore : à laisser ; manual : action hors du dépôt (secret, config déployée). */
-  verdict: 'fix' | 'ignore' | 'manual'
+  /**
+   * fix : se corrige dans le code ; ignore : à laisser ; manual : action hors du dépôt (secret, config déployée) ;
+   * ask : l'agent ne voit pas de correction propre et propose une exception (règle désactivée) : à moi de trancher.
+   */
+  verdict: 'fix' | 'ignore' | 'manual' | 'ask'
   reason: string
   fix: string
 }

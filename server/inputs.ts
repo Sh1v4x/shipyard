@@ -48,7 +48,7 @@ const checkItem = z.object({
   problem: z.string(),
   introduced: z.boolean(),
   blocking: z.boolean(),
-  verdict: z.enum(['fix', 'ignore', 'manual']),
+  verdict: z.enum(['fix', 'ignore', 'manual', 'ask']),
   reason: z.string(),
   fix: z.string(),
 }) satisfies z.ZodType<CheckItem>

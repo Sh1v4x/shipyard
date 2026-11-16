@@ -2,9 +2,9 @@
 name: Corriger une remarque d’auto-review
 group: Ma PR
 when: Worktree › Fichiers › Corriger avec l’IA
-vars: [finding.file, finding.line, finding.severity, finding.title, finding.body, finding.fix, context, lang.app]
+vars: [finding.file, finding.line, finding.severity, finding.title, finding.body, finding.fix, context, rules, lang.app]
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *)]
+allowedTools: [Read, Grep, Glob, WebSearch, WebFetch, Edit, Write, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(npx *), Bash(yarn *)]
 ---
 
 Fix this review finding in the current directory:
@@ -25,8 +25,13 @@ Rules:
 - Surgical fix: change only what is necessary, without refactoring around it. Adapt it to the code as it is now.
 - If the fix would undo or contradict something the branch does on purpose (ticket requirement, decision visible in a commit or in the work history), or break a behavior that callers or tests rely on: change nothing and explain what it contradicts.
 - If the fix touches a shared export, update its usages.
+- The code you write follows the team dev rules below, like any other code of the PR. Surgical does not mean dirty: a fix that satisfies the finding but breaks one of these rules is not acceptable. If the fix you were given cannot be applied without breaking one, apply the clean variant and say so in summary; if there is none, change nothing and explain why.
 - Run the lint or typecheck for the file if the project has one, and fix whatever your change breaks.
 - If the finding turns out to be unfounded after reading the code, change nothing and explain why.
+
+### Team dev rules
+
+{rules}
 
 StructuredOutput:
 - changed: true if files were modified.

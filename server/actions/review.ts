@@ -343,6 +343,7 @@ export const reviewActions: WorktreeActions = {
     if (!f) throw new HttpError(400, 'Remarque manquante')
     return startRun(
       specFrom('finding-fix', {
+        rules: rulesFor(d.project.id),
         'finding.file': f.file, 'finding.line': f.line, 'finding.severity': f.severity, 'finding.title': f.title, 'finding.body': f.body, 'finding.fix': f.fix,
         context: await branchContext(d),
       }, {

@@ -2,9 +2,9 @@
 name: Corriger plusieurs jobs CI
 group: Qualité
 when: Worktree › CI › Corriger la sélection
-vars: [pr.base, jobs, lang.app]
+vars: [pr.base, jobs, rules, lang.app]
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, TodoWrite, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(git show *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(bunx *), Bash(npx *), Bash(yarn *)]
+allowedTools: [Read, Grep, Glob, WebSearch, WebFetch, Edit, Write, TodoWrite, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(git show *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(bunx *), Bash(npx *), Bash(yarn *)]
 disallowedTools: [Bash(git commit *), Bash(git push *), Bash(git add *), Bash(git reset *), Bash(git stash *), Bash(git checkout *), Bash(git restore *), Bash(git clean *)]
 ---
 
@@ -16,9 +16,14 @@ Rules:
 - Read the files before modifying them. Minimal fix for each cause, only what makes the jobs pass.
 - Several jobs with the same cause: a single fix.
 - Never disable a test, a lint rule or a CI step to make it pass.
+- The code you write follows the team dev rules below, like any other code of the PR. Surgical does not mean dirty: a fix that satisfies the jobs but breaks one of these rules is not acceptable. If the fix you were given cannot be applied without breaking one, apply the clean variant and say so in summary; if there is none, leave that job unfixed and explain why.
 - A job that needs a database (migrations, integration tests) is reproduced with what the repository already provides (its docker-compose service, its test global setup or the Postgres already running on the workstation), never with a container started from a script of your own. Any command that can hang (container, install, long test) runs in the foreground with a time limit (`timeout 300 …`); if it exceeds it, stop it and move on: say in summary what could not be checked.
 - Reproduce each check locally when possible (lint, typecheck, targeted test, .env check script), and fix what still breaks.
 - Don't commit or push: Shipyard makes a single commit, then CI reruns.
+
+### Team dev rules
+
+{rules}
 
 StructuredOutput:
 - changed: true if files were modified.

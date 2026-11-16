@@ -4,7 +4,7 @@ group: Ma PR
 when: Worktree › Fichiers › Corriger les remarques acceptées
 vars: [findings, context, review, scope, rules, lang.app]
 permissionMode: acceptEdits
-allowedTools: [Read, Grep, Glob, Edit, Write, TodoWrite, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(bunx *), Bash(npx *), Bash(yarn *)]
+allowedTools: [Read, Grep, Glob, WebSearch, WebFetch, Edit, Write, TodoWrite, Bash(git diff *), Bash(git status *), Bash(git log *), Bash(npm run *), Bash(npm install*), Bash(npm i *), Bash(npm ci*), Bash(npm uninstall *), Bash(npm ls*), Bash(npm -v), Bash(pnpm *), Bash(bun *), Bash(bunx *), Bash(npx *), Bash(yarn *)]
 disallowedTools: [Bash(git commit *), Bash(git push *), Bash(git add *), Bash(git reset *), Bash(git stash *), Bash(git checkout *), Bash(git restore *), Bash(git clean *)]
 ---
 
@@ -49,6 +49,7 @@ The files the branch changes, and the only ones you may modify:
 - Smallest change that fixes it. Every line you add will be reviewed again: no new helper, abstraction, constant table or test unless the finding asks for exactly that, and no "while I am here" cleanup. When the fix asked for is itself an over-engineering for the problem described (a new abstraction for a two-line duplication), do the simple version and say so.
 - A fix changes a behavior used elsewhere in the branch (another screen, the API, a test): adapt those places too, so the whole stays consistent.
 - Two findings that touch the same spot: handle them together, consistently.
+- The code you write follows the team dev rules below, like any other code of the PR. Surgical does not mean dirty: a fix that satisfies the finding but breaks one of these rules is not acceptable. If the fix you were given cannot be applied without breaking one, apply the clean variant and say so in summary; if there is none, leave that finding unfixed and explain why.
 - If a fix touches a shared export, update its usages.
 - A finding already fixed in the code: change nothing, status already.
 - At the end, run the project's lint and typecheck once on the touched files, and fix what you broke.

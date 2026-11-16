@@ -15,7 +15,9 @@ import { BlockedCommit } from '../../components/BlockedCommit.tsx'
 const STATUS: Record<CheckReport['status'], [string, Tone]> = { pass: ['Rien à signaler', 'green'], warn: ['À regarder', 'amber'], fail: ['En échec', 'red'] }
 /** Rapport avec une section Oxlint : seul son compte sur les lignes ajoutées décide. */
 const GATE: Record<'pass' | 'fail', [string, Tone]> = { pass: ['La PR passe', 'green'], fail: ['Bloque la PR', 'red'] }
-const VERDICT: Record<CheckItem['verdict'], [string, Tone]> = { fix: ['À corriger', 'amber'], ignore: ['À ignorer', 'gray'], manual: ['Hors du dépôt', 'blue'] }
+const VERDICT: Record<CheckItem['verdict'], [string, Tone]> = { fix: ['À corriger', 'amber'], ignore: ['À ignorer', 'gray'], manual: ['Hors du dépôt', 'blue'], ask: ['À décider', 'purple'] }
+
+const FIX_LABEL: Partial<Record<CheckItem['verdict'], string>> = { manual: 'À faire : ', ask: 'Exception proposée (appliquée seulement si tu coches) : ' }
 
 /** Rapports qui demandent mon attention : le compteur de l'onglet. */
 export const checksToReview = (reports: CheckReport[] | undefined) => (reports ?? []).filter((r) => r.status !== 'pass' && !r.stale).length
@@ -47,8 +49,9 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
   const toast = useToast()
   const out = analysis.result
   // Par défaut : ce qui bloque la PR, et ce qu'elle a introduit et qui se corrige dans le code.
+  // Jamais une exception proposée (ask) : désactiver une règle se décide en la cochant soi-même.
   const [picked, setPicked] = useState<string[]>([])
-  useEffect(() => setPicked(out?.items.filter((i) => i.blocking || (i.verdict === 'fix' && i.introduced)).map((i) => i.id) ?? []), [out])
+  useEffect(() => setPicked(out?.items.filter((i) => i.verdict !== 'ask' && (i.blocking || (i.verdict === 'fix' && i.introduced))).map((i) => i.id) ?? []), [out])
   const selected = out?.items.filter((i) => picked.includes(i.id)) ?? []
   const [label, tone] = r.blocking == null ? STATUS[r.status] : GATE[r.blocking > 0 ? 'fail' : 'pass']
 
@@ -115,7 +118,7 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
                         </span>
                         <span className="mt-1.5 block text-sm font-medium">{i.problem}</span>
                         <span className="mt-1 block text-sm text-muted-foreground">{i.reason}</span>
-                        <span className="mt-1 block text-sm"><span className="font-medium">{i.verdict === 'manual' ? 'À faire : ' : 'Correction : '}</span>{i.fix}</span>
+                        <span className="mt-1 block text-sm"><span className="font-medium">{FIX_LABEL[i.verdict] ?? 'Correction : '}</span>{i.fix}</span>
                       </span>
                     </label>
                   ))}

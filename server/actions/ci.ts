@@ -5,6 +5,7 @@ import * as git from '../lib/git.ts'
 import * as gh from '../lib/github.ts'
 import { checkReports, runReportCommand } from '../lib/checks.ts'
 import * as schemas from '../schemas.ts'
+import { rulesFor } from '../lib/rules.ts'
 import { blockOnRefusal, commitAndPush, commitRepos } from './commitFlow.ts'
 import { type WorktreeAction, type WorktreeActions, specFrom } from './context.ts'
 import { warnOn } from '../lib/log.ts'
@@ -29,7 +30,7 @@ async function checksAction({ kind, input, project, d, scope, cwd, needPr, vars 
   return startRun(
     specFrom(kind, {
       ...vars, 'report.title': report.title, 'report.command': report.command ?? 'none',
-      items: items.map((i) => `- [${i.source}] ${i.file ? `${i.file}${i.line ? `:${i.line}` : ''}: ` : ''}${i.problem}\n  Fix: ${i.fix}`).join('\n'),
+      items: items.map((i) => `- [${i.source}] ${i.file ? `${i.file}${i.line ? `:${i.line}` : ''}: ` : ''}${i.problem}\n  ${i.verdict === 'ask' ? 'Exception approved by the user' : 'Fix'}: ${i.fix}`).join('\n'),
     }, {
       kind, title: `Corriger · ${report.title}`, scope: runScope, cwd, schema: schemas.fixSchema,
       onSuccess: async (run) => {
@@ -119,6 +120,7 @@ export const ciActions: WorktreeActions = {
     if (!jobs.length) throw new HttpError(400, 'Aucun diagnostic à corriger')
     return startRun(
       specFrom('ci-fix-all', {
+        rules: rulesFor(d.project.id),
         'pr.base': pr.base,
         jobs: jobs.map((j) => `### ${j.name}\nCause: ${j.cause}\nFix: ${j.fix}`).join('\n\n'),
       }, {
@@ -149,7 +151,7 @@ export const ciActions: WorktreeActions = {
     const job = input.job
     if (!job || !input.ci) throw new HttpError(400, 'Diagnostic CI manquant')
     return startRun(
-      specFrom('ci-fix', { 'job.name': job.name, 'ci.cause': input.ci.cause, 'ci.fix': input.ci.fix }, {
+      specFrom('ci-fix', { rules: rulesFor(d.project.id), 'job.name': job.name, 'ci.cause': input.ci.cause, 'ci.fix': input.ci.fix }, {
         kind, title: `Corriger ${job.name}`, scope: { ...scope, ref: job.jobId ?? job.name }, cwd, schema: schemas.fixSchema,
         onSuccess: async (run) => {
           const out = run.structured as FixOutput

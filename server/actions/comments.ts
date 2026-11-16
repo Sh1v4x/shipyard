@@ -4,6 +4,7 @@ import { getRun, startJob, startRun, type RunSpec } from '../lib/claude.ts'
 import * as git from '../lib/git.ts'
 import * as gh from '../lib/github.ts'
 import * as schemas from '../schemas.ts'
+import { rulesFor } from '../lib/rules.ts'
 import { HookRefused, blockOnRefusal, commitRepos, existingCommitUrl, linkedToCommit, repoOf, toBlocked } from './commitFlow.ts'
 import { DIFFS_DIR, type WorktreeActions, assertNoMerge, linkedContext, linkedFixText, linkedForFix, prContext, specFrom, threadText } from './context.ts'
 
@@ -26,6 +27,7 @@ async function commentFixSpec(d: WorktreeDetail, thread: ReviewThread, action: s
   const first = thread.comments[0]
   const fix = await linkedForFix(d)
   return specFrom('comment-fix', {
+        rules: rulesFor(d.project.id),
     'comment.file': thread.path, 'comment.line': thread.line, 'comment.author': first?.author, 'comment.body': first?.body, 'audit.action': action,
     linked: linkedFixText(fix.linked),
     general: d.pr ? await generalText(d.project.repo, d.pr.number) : '',
@@ -87,6 +89,7 @@ export const commentsActions: WorktreeActions = {
     const fix = await linkedForFix(d)
     const files = await git.changedFiles(cwd, pr.base)
     return startRun(specFrom('general-fix', {
+        rules: rulesFor(d.project.id),
       'comment.author': comment.author, 'comment.body': comment.body,
       files: files.map((f) => `- ${f}`).join('\n') || '(none)', 'pr.base': pr.base,
       linked: linkedFixText(fix.linked),
@@ -150,6 +153,7 @@ export const commentsActions: WorktreeActions = {
         ctx.log({ t: 'progress', done: 0, total: fixes.length, label: 'commentaires corrigés', at: Date.now() })
         ctx.log({ t: 'info', text: `Un agent pour ${fixes.length} correction(s)${session ? ', dans la session de l’analyse' : ''}…` })
         const r = await ctx.runChild(specFrom('comments-fix-all', {
+        rules: rulesFor(d.project.id),
           comments: fixes.map(({ thread, action }) => [
             `### threadId: ${thread.id}`,
             `File: ${where(thread)}`,

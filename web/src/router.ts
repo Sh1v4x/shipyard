@@ -17,7 +17,7 @@ export type Route =
   | { page: 'inbox' }
   | { page: 'daily' }
   | { page: 'stats'; from?: string; to?: string; scope?: StatsScope }
-  | { page: 'settings' }
+  | { page: 'settings'; section?: string }
 
 export function parse(hash: string): Route {
   const [path, query = ''] = hash.replace(/^#\/?/, '').split('?')
@@ -42,7 +42,7 @@ export function parse(hash: string): Route {
     const scope = q.get('scope')
     return { page: 'stats', from: q.get('from') ?? undefined, to: q.get('to') ?? undefined, scope: scope === 'all' || scope === 'tracked' ? scope : undefined }
   }
-  if (s[0] === 'settings') return { page: 'settings' }
+  if (s[0] === 'settings') return { page: 'settings', section: s[1] }
   return { page: 'home' }
 }
 
@@ -84,7 +84,7 @@ export function href(r: Route): string {
       return `#/stats${q.size ? `?${q}` : ''}`
     }
     case 'settings':
-      return '#/settings'
+      return `#/settings${r.section ? `/${r.section}` : ''}`
     default:
       return '#/'
   }

@@ -1,4 +1,4 @@
-import { ArrowUpRightIcon, CheckCircle2Icon, LaptopIcon, PlayIcon, TicketPlusIcon, Trash2Icon } from 'lucide-react'
+import { ArrowUpRightIcon, CheckCircle2Icon, GitPullRequestArrowIcon, LaptopIcon, PlayIcon, TicketIcon, TicketPlusIcon, Trash2Icon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,7 +9,7 @@ import type { LocalTicket, PrPrepareOutput, Project } from '../../../../shared/t
 import { useCreatePr, useDismissInbox, usePromoteLocalTicket, useRemoveLocalTicket, useRemoveWorktree } from '../../data/mutations.ts'
 import { useBranches } from '../../data/queries.ts'
 import { useAction } from '../../data/runs.ts'
-import { Badge, ErrorBox, Pill, PromptMenu, RunPanel, SectionLabel, Spinner, plural, useToast } from '../../ui.tsx'
+import { Badge, ErrorBox, FoldCard, Pill, PromptMenu, RunningBadge, RunPanel, SectionLabel, Spinner, plural, useToast } from '../../ui.tsx'
 import { go } from '../../router.ts'
 import type { TabProps } from '../Worktree.tsx'
 import { CommitCard } from './CommitCard.tsx'
@@ -24,37 +24,30 @@ export function TicketTab({ project, detail, wtId }: TabProps) {
   return (
     <section className="flex flex-col gap-5" aria-label="Ticket">
       {ticketDone && !w.merged && <DoneNotice project={project} detail={detail} wtId={wtId} />}
-      <div className="flex flex-wrap items-start gap-5">
-        {ticket ? (
-          <article className="flex min-w-0 flex-[1_1_320px] flex-col gap-3 rounded-xl border bg-card p-5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-xs text-muted-foreground">{ticket.id}</span>
-              <TicketStatus project={project} ticket={ticket} />
-              <span className="text-xs text-muted-foreground">{ticket.priority}</span>
-            </div>
-            <h2 className="text-lg leading-snug font-semibold">{ticket.title}</h2>
-            <div>
-              <SectionLabel>Description</SectionLabel>
-              <p className="text-sm leading-relaxed whitespace-pre-line">{ticket.description || <span className="text-muted-foreground">Pas de description.</span>}</p>
-            </div>
-            <Button variant="link" size="sm" className="h-auto self-start px-0" asChild>
-              <a href={ticket.url} target="_blank" rel="noreferrer">Ouvrir dans Linear<ArrowUpRightIcon /></a>
-            </Button>
-          </article>
-        ) : local ? (
-          <LocalTicketCard project={project} wtId={wtId} local={local} />
-        ) : (
-          <article className="flex min-w-0 flex-[1_1_320px] flex-col gap-1.5 rounded-xl border border-dashed p-5">
-            <h2 className="font-semibold">{w.ticketId ? `Ticket ${w.ticketId} introuvable` : 'Pas de ticket Linear'}</h2>
-            <p className="text-sm text-muted-foreground">{w.ticketId ? 'Vérifie que LINEAR_API_KEY est configurée.' : 'Ce worktree a été créé depuis une branche. Décris la modification à faire : l’IA part des commits et du diff de la branche.'}</p>
-          </article>
-        )}
+      {/* Chaque section est repliée par défaut ; celle où un agent travaille s'ouvre d'elle-même. */}
+      {ticket ? (
+        <FoldCard icon={TicketIcon} title={ticket.title} summary={<><span className="font-mono text-xs">{ticket.id}</span> · {ticket.priority}</>} badge={<TicketStatus project={project} ticket={ticket} />}>
+          <div>
+            <SectionLabel>Description</SectionLabel>
+            <p className="text-sm leading-relaxed whitespace-pre-line">{ticket.description || <span className="text-muted-foreground">Pas de description.</span>}</p>
+          </div>
+          <Button variant="link" size="sm" className="h-auto self-start px-0" asChild>
+            <a href={ticket.url} target="_blank" rel="noreferrer">Ouvrir dans Linear<ArrowUpRightIcon /></a>
+          </Button>
+        </FoldCard>
+      ) : local ? (
+        <LocalTicketCard project={project} wtId={wtId} local={local} />
+      ) : (
+        <article className="flex min-w-0 flex-col gap-1.5 rounded-xl border border-dashed p-5">
+          <h2 className="font-semibold">{w.ticketId ? `Ticket ${w.ticketId} introuvable` : 'Pas de ticket Linear'}</h2>
+          <p className="text-sm text-muted-foreground">{w.ticketId ? 'Vérifie que LINEAR_API_KEY est configurée.' : 'Ce worktree a été créé depuis une branche. Décris la modification à faire : l’IA part des commits et du diff de la branche.'}</p>
+        </article>
+      )}
 
-        {ticket || local || w.kind === 'review' ? <TicketAgent {...{ project, detail, wtId }} /> : <TicketAgent {...{ project, detail, wtId }} mode="change" />}
-      </div>
+      {ticket || local || w.kind === 'review' ? <TicketAgent {...{ project, detail, wtId }} /> : <TicketAgent {...{ project, detail, wtId }} mode="change" />}
 
       {/* Avec un ticket : une modification hors ticket reste possible, avec son propre plan. */}
-      {(ticket || local) && w.kind !== 'review' && <div className="flex"><TicketAgent {...{ project, detail, wtId }} mode="change" /></div>}
+      {(ticket || local) && w.kind !== 'review' && <TicketAgent {...{ project, detail, wtId }} mode="change" />}
 
       {w.kind !== 'review' && <CommitCard {...{ project, detail, wtId }} />}
       {!pr && w.kind !== 'review' && !ticketDone && !w.merged && <CreatePrCard {...{ project, detail, wtId }} />}
@@ -124,14 +117,14 @@ function CreatePrCard({ project, detail, wtId }: TabProps) {
   }
 
   return (
-    <article className="flex flex-col gap-4 rounded-xl border bg-card p-5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="font-semibold">Créer la PR</h2>
-          <p className="mt-0.5 text-sm text-muted-foreground">{plural(commitsAhead.length, 'commit', 'commits')} sur la branche · {plural(dirtyFiles.length, 'fichier non commité', 'fichiers non commités')}</p>
-        </div>
-        <PromptMenu items={[['pr-prepare', 'Création de PR']]} />
-      </div>
+    <FoldCard
+      icon={GitPullRequestArrowIcon}
+      title="Créer la PR"
+      summary={`${plural(commitsAhead.length, 'commit', 'commits')} sur la branche · ${plural(dirtyFiles.length, 'fichier non commité', 'fichiers non commités')}`}
+      active={prep.working || busy}
+      badge={prep.working || busy ? <RunningBadge /> : draft ? <Badge tone="amber">PR à valider</Badge> : null}
+      actions={<PromptMenu items={[['pr-prepare', 'Création de PR']]} />}
+    >
       <div className="flex flex-wrap items-start gap-4">
         <div className="min-w-0 flex-[1_1_260px]">
           <SectionLabel>Commits sur la branche</SectionLabel>
@@ -176,7 +169,7 @@ function CreatePrCard({ project, detail, wtId }: TabProps) {
           </div>
         </div>
       )}
-    </article>
+    </FoldCard>
   )
 }
 
@@ -186,13 +179,12 @@ function LocalTicketCard({ project, wtId, local }: { project: Project; wtId: str
   const remove = useRemoveLocalTicket(project.id, wtId)
   const toast = useToast()
   return (
-    <article className="flex min-w-0 flex-[1_1_320px] flex-col gap-3 rounded-xl border bg-card p-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="gray"><LaptopIcon className="size-3" />Ticket local</Badge>
-        <Badge tone="blue">{local.category}</Badge>
-        <span className="text-xs text-muted-foreground">créé le {new Date(local.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</span>
-      </div>
-      <h2 className="text-lg leading-snug font-semibold">{local.title}</h2>
+    <FoldCard
+      icon={LaptopIcon}
+      title={local.title}
+      summary={`Ticket local · créé le ${new Date(local.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}`}
+      badge={<Badge tone="blue">{local.category}</Badge>}
+    >
       <div>
         <SectionLabel>Constat</SectionLabel>
         <p className="text-sm leading-relaxed">{local.why}</p>
@@ -214,6 +206,6 @@ function LocalTicketCard({ project, wtId, local }: { project: Project; wtId: str
           remove.mutate(undefined, { onSuccess: () => toast('Ticket local supprimé'), onError: (e) => toast(e.message, true) })
         }}><Trash2Icon />Supprimer le ticket local</Button>
       </div>
-    </article>
+    </FoldCard>
   )
 }

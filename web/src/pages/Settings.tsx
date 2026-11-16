@@ -1,5 +1,5 @@
 import { BellIcon, ChevronRightIcon, FolderGit2Icon, KeyRoundIcon, LanguagesIcon, Link2Icon, PaletteIcon, PlusIcon, TagsIcon, Trash2Icon, XIcon, type LucideIcon } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { LabelRole, Language, Languages, Project } from '../../../shared/types.ts'
 import { DEFAULT_LABEL_RULES, LABEL_ROLES } from '../../../shared/review.ts'
 import { Button } from '@/components/ui/button'
@@ -38,13 +38,30 @@ function useOpenSections() {
   }
   const open = SECTIONS.filter((k) => !closed.includes(k))
   const toggle = (k: SectionKey) => save(closed.includes(k) ? closed.filter((x) => x !== k) : [...closed, k])
-  return { open, toggle, setAll: (v: boolean) => save(v ? [] : [...SECTIONS]) }
+  return { open, toggle, show: (k: SectionKey) => closed.includes(k) && save(closed.filter((x) => x !== k)), setAll: (v: boolean) => save(v ? [] : [...SECTIONS]) }
 }
 
-export function SettingsPage() {
+interface SectionState {
+  /** Ancre de la carte : la barre latérale y mène (#/settings/<ancre>). */
+  anchor: SectionKey
+  open: boolean
+  onToggle: () => void
+}
+
+/** `section` : carte demandée depuis la barre latérale ; elle est dépliée et la page défile jusqu'à elle. */
+export function SettingsPage({ section: target }: { section?: string }) {
   const sections = useOpenSections()
   const allOpen = sections.open.length === SECTIONS.length
-  const section = (key: SectionKey) => ({ open: sections.open.includes(key), onToggle: () => sections.toggle(key) })
+  const section = (key: SectionKey): SectionState => ({ anchor: key, open: sections.open.includes(key), onToggle: () => sections.toggle(key) })
+
+  useEffect(() => {
+    const key = SECTIONS.find((k) => k === target)
+    if (!key) return
+    sections.show(key)
+    // Après le rendu : la carte vient peut-être d'être dépliée, sa hauteur a changé.
+    const frame = requestAnimationFrame(() => document.getElementById(`settings-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    return () => cancelAnimationFrame(frame)
+  }, [target]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
@@ -102,18 +119,16 @@ export function SettingsPage() {
 }
 
 /** Carte de réglages repliable : un clic sur l'en-tête plie ou déplie le contenu. */
-function Section({ icon: IconCmp, title, description, aside, open, onToggle, children }: {
+function Section({ icon: IconCmp, title, description, aside, anchor, open, onToggle, children }: SectionState & {
   icon: LucideIcon
   title: string
   description: ReactNode
   aside?: ReactNode
-  open: boolean
-  onToggle: () => void
   children: ReactNode
 }) {
-  const id = `settings-${title}`
+  const id = `settings-${anchor}-body`
   return (
-    <section className="flex flex-col rounded-xl border bg-card shadow-xs">
+    <section id={`settings-${anchor}`} className="flex scroll-mt-20 flex-col rounded-xl border bg-card shadow-xs">
       <div className="flex items-start justify-between gap-4 p-5">
         <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={id} className="group/s flex min-w-0 flex-1 items-start gap-2 text-left">
           <ChevronRightIcon className={cn('mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
@@ -137,7 +152,7 @@ const LANGUAGE_ROWS: { key: keyof Languages; title: string; help: string }[] = [
 ]
 
 /** Langue de ce que les agents écrivent, par destinataire : injectée dans les prompts ({lang.app}, {lang.github}…). */
-function LanguagesSection({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+function LanguagesSection(state: SectionState) {
   const settings = useSettings()
   const save = useSaveSettings()
   const toast = useToast()
@@ -145,8 +160,7 @@ function LanguagesSection({ open, onToggle }: { open: boolean; onToggle: () => v
   const set = (key: keyof Languages, v: Language) => l && save.mutate({ languages: { ...l, [key]: v } }, { onError: (e) => toast(e.message, true) })
   return (
     <Section
-      open={open}
-      onToggle={onToggle}
+      {...state}
       icon={LanguagesIcon}
       title="Langues"
       description="Langue de ce que les agents écrivent, selon qui le lit. Les prompts eux-mêmes sont en anglais ; le code, les commentaires de code, les titres de commit et les noms de branche restent toujours en anglais."
@@ -169,12 +183,11 @@ function LanguagesSection({ open, onToggle }: { open: boolean; onToggle: () => v
 }
 
 /** Thème cyberpunk : propre à ce navigateur, comme le choix clair / sombre. */
-function AppearanceSection({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+function AppearanceSection(state: SectionState) {
   const { cyber, setCyber } = useTheme()
   return (
     <Section
-      open={open}
-      onToggle={onToggle}
+      {...state}
       icon={PaletteIcon}
       title="Apparence"
       description="Le thème cyberpunk passe l’interface en néon sur fond noir : titres façon terminal, lignes de balayage, petites animations à l’ouverture des pages et palette ⌘K en console. Il remplace le choix clair / sombre tant qu’il est actif. Les animations se coupent si macOS demande de réduire les animations."
@@ -185,7 +198,7 @@ function AppearanceSection({ open, onToggle }: { open: boolean; onToggle: () => 
   )
 }
 
-function NotificationsSection({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+function NotificationsSection(state: SectionState) {
   const settings = useSettings()
   const save = useSaveSettings()
   const test = useTestNotification()
@@ -195,8 +208,7 @@ function NotificationsSection({ open, onToggle }: { open: boolean; onToggle: () 
 
   return (
     <Section
-      open={open}
-      onToggle={onToggle}
+      {...state}
       icon={BellIcon}
       title="Notifications"
       description="Le serveur vérifie GitHub et Linear à intervalle régulier et te prévient quand une tâche apparaît : review demandée, nouveau commentaire, CI en échec, conflit, PR à tester ou review à relancer, nouveau ticket en Todo. Un clic sur la notification ouvre la bonne page."

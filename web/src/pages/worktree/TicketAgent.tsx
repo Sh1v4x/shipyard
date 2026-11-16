@@ -1,4 +1,4 @@
-import { CheckIcon, WrenchIcon, ChevronRightIcon, CircleHelpIcon, FlaskConicalIcon, MessageCircleQuestionIcon, PlayIcon, PlusIcon, SearchIcon, Trash2Icon, Undo2Icon } from 'lucide-react'
+import { BotIcon, CheckIcon, WrenchIcon, ChevronRightIcon, CircleHelpIcon, FlaskConicalIcon, MessageCircleQuestionIcon, PlayIcon, PlusIcon, SearchIcon, Trash2Icon, Undo2Icon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -7,8 +7,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type { BranchAskOutput, Run, TicketPlanOutput, TicketWorkOutput } from '../../../../shared/types.ts'
 import { useAbandonAgent, useRunDecision } from '../../data/mutations.ts'
+import { useRuns } from '../../data/queries.ts'
 import { useAction } from '../../data/runs.ts'
-import { Badge, Pill, PromptMenu, RunPanel, SectionLabel, Spinner, plural, useToast } from '../../ui.tsx'
+import { Badge, FoldCard, Pill, PromptMenu, RunningBadge, RunPanel, SectionLabel, Spinner, plural, useToast } from '../../ui.tsx'
 import { Markdown } from '../../components/Markdown.tsx'
 import type { TabProps } from '../Worktree.tsx'
 
@@ -108,14 +109,26 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
   // Repartir d'une demande neuve sans rien annuler : aussi après un travail lancé sans plan, qui n'a pas de plan à remplacer.
   const canRestart = (!!plan.id || directWork) && !decided && !plan.busy && !workRunning && !restart
 
+  // Question ou recherche en cours (lancée avant un rechargement, par exemple) : on l'affiche, la section s'ouvre.
+  const asks = useRuns({ ...scope, kind: 'branch-ask' }, mode === 'change')
+  const askRunning = asks.data?.find((r) => r.status === 'running')
+  const askWay = askRunning?.scope.ref === 'question' || askRunning?.scope.ref === 'research' ? askRunning.scope.ref : null
+  useEffect(() => {
+    if (askWay) setWay(askWay)
+  }, [askRunning?.id, askWay])
+  const agentBusy = plan.working || work.working || !!askRunning
+  // Ce qui attend une décision, lisible section repliée.
+  const waiting = workIsCurrent ? (work.result && !decided ? 'Travail à valider' : null) : plan.result && !planDropped ? 'Plan à valider' : null
+
   return (
-    <article className="flex min-w-0 flex-[1.4_1_420px] flex-col gap-4 rounded-xl border bg-card p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="font-semibold">{m.title}</h2>
-          {mode === 'change' && <p className="mt-0.5 text-sm text-muted-foreground">{WAYS.find((x) => x.key === way)!.help}</p>}
-        </div>
-        <span className="flex flex-wrap items-center gap-1">
+    <FoldCard
+      icon={mode === 'change' ? WrenchIcon : BotIcon}
+      title={m.title}
+      summary={mode === 'change' ? 'Hors ticket : modifier, poser une question ou lancer une recherche sur la branche.' : 'Un plan à valider, le travail, puis l’avant / après à approuver.'}
+      active={agentBusy}
+      badge={agentBusy ? <RunningBadge /> : waiting ? <Badge tone="amber">{waiting}</Badge> : null}
+      actions={(
+        <>
           {canRestart && <Button variant="outline" size="sm" onClick={() => setRestart(true)}><PlusIcon />{mode === 'change' ? 'Nouvelle modification' : 'Nouveau plan'}</Button>}
           {canAbandon && (
             <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={abandon.isPending} onClick={doAbandon}>
@@ -124,8 +137,10 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
           )}
           <PromptMenu items={[[m.plan, 'Plan']]} />
           <PromptMenu items={[[mode === 'change' ? 'change' : ticket ? 'ticket' : 'free', 'Travail']]} />
-        </span>
-      </div>
+        </>
+      )}
+    >
+      {mode === 'change' && <p className="text-sm text-muted-foreground">{WAYS.find((x) => x.key === way)!.help}</p>}
       {mode === 'change' && (
         <div className="flex flex-wrap gap-2">
           {WAYS.map((x) => <Pill key={x.key} active={x.key === way} onClick={() => setWay(x.key)}><x.icon className="size-3.5" />{x.label}</Pill>)}
@@ -214,7 +229,7 @@ export function TicketAgent({ project, detail, wtId, mode = 'ticket' }: TabProps
         )}
         </>
       )}
-    </article>
+    </FoldCard>
   )
 }
 

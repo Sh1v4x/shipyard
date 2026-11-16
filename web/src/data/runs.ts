@@ -105,8 +105,12 @@ export function useAction<T>(kind: ActionKind, scope: { project: string; worktre
   const start = useStartAction()
   const toast = useToast()
   const ok = latest.run?.status === 'success'
+  // `running` est vrai aussi le temps de charger un run terminé : la liste des runs dit s'il tourne vraiment.
+  const listed = latest.history.find((r) => r.id === latest.id)
   return {
     ...latest,
+    /** Un agent travaille vraiment (lancement compris), sans compter le chargement d'un run déjà terminé. */
+    working: start.isPending || (latest.running && (listed ? listed.status === 'running' : true)),
     result: ok ? (latest.run!.structured as T) : null,
     failed: latest.run != null && latest.run.status !== 'success',
     starting: start.isPending,

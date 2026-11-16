@@ -1,6 +1,6 @@
-import { CalendarDaysIcon, ChartColumnIcon, ChevronRightIcon, ClipboardCheckIcon, ChevronsUpDownIcon, FileTextIcon, FolderGit2Icon, HouseIcon, LightbulbIcon, MenuIcon, PinIcon, PinOffIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, SearchIcon, SettingsIcon, ShipIcon, SquareIcon, StickyNoteIcon, TicketPlusIcon, Trash2Icon, ZapIcon, type LucideIcon } from 'lucide-react'
+import { BotIcon, ChartColumnIcon, ChevronRightIcon, ChevronsUpDownIcon, FolderGit2Icon, HouseIcon, MenuIcon, PinIcon, PinOffIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, SearchIcon, SettingsIcon, ShipIcon, SquareIcon, TicketIcon, Trash2Icon, type LucideIcon } from 'lucide-react'
 import { Suspense, useEffect, useState, type ReactNode } from 'react'
-import type { BrokenWorktree, Project, ProjectOverview, QueueItem, QueueTone } from '../../shared/types.ts'
+import type { BrokenWorktree, Project, ProjectOverview, QueueGroup, QueueItem, QueueTone } from '../../shared/types.ts'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Separator } from '@/components/ui/separator'
@@ -91,7 +91,7 @@ export function App() {
           {route.page === 'notes' && <NotesPage />}
           {route.page === 'daily' && <DailyPage />}
           {route.page === 'stats' && <StatsPage from={route.from} to={route.to} scope={route.scope} />}
-          {route.page === 'settings' && <SettingsPage />}
+          {route.page === 'settings' && <SettingsPage section={route.section} />}
           {projects.data?.length === 0 && route.page !== 'add-project' && route.page !== 'prompts' && <AddProjectPage first />}
           </Suspense>
         </main>
@@ -334,6 +334,28 @@ const DOT: Record<QueueTone, string> = {
   red: 'bg-red-500', amber: 'bg-amber-500', purple: 'bg-violet-500', blue: 'bg-blue-500', green: 'bg-emerald-500', gray: 'bg-muted-foreground/40',
 }
 
+/** Couleur de chaque catégorie de la file, dans la barre latérale : le libellé et le filet qui longe ses worktrees. */
+const RAIL: Record<QueueGroup, { text: string; line: string }> = {
+  me: { text: 'text-amber-600 dark:text-amber-400', line: 'border-amber-500/50' },
+  testing: { text: 'text-fuchsia-600 dark:text-fuchsia-400', line: 'border-fuchsia-500/50' },
+  start: { text: 'text-sky-600 dark:text-sky-400', line: 'border-sky-500/50' },
+  progress: { text: 'text-emerald-600 dark:text-emerald-400', line: 'border-emerald-500/50' },
+  others: { text: 'text-indigo-600 dark:text-indigo-400', line: 'border-indigo-500/50' },
+  clean: { text: 'text-teal-600 dark:text-teal-400', line: 'border-teal-500/50' },
+  ghost: { text: 'text-muted-foreground', line: 'border-muted-foreground/40' },
+}
+
+/** Worktrees d'une même catégorie : libellé de sa couleur, et un filet de la même couleur le long des lignes qui en font partie. */
+function RailGroup({ group, label, count, children }: { group: QueueGroup; label: string; count: number; children: ReactNode }) {
+  const c = RAIL[group]
+  return (
+    <div className="flex shrink-0 flex-col">
+      <span className={cn('px-2.5 pt-2 pb-1 text-[11px] font-medium', c.text)}>{label} <span className="font-normal opacity-70">· {count}</span></span>
+      <div className={cn('ml-3 flex flex-col gap-0.5 border-l-2 pl-0.5', c.line)}>{children}</div>
+    </div>
+  )
+}
+
 /** Un worktree sur une ligne : état (couleur de la file), titre, numéro. Épingler au survol. */
 function WorktreeRow({ item, projectId, pinned }: { item: QueueItem; projectId: string; pinned: boolean }) {
   const prefetch = usePrefetchWorktree()
@@ -380,23 +402,6 @@ function WorktreeRow({ item, projectId, pinned }: { item: QueueItem; projectId: 
   )
 }
 
-function NavLink({ to, icon: IconCmp, active, children, aside }: { to: string; icon: LucideIcon; active: boolean; children: ReactNode; aside?: ReactNode }) {
-  return (
-    <a
-      href={to}
-      aria-current={active ? 'page' : undefined}
-      className={cn(
-        'flex h-8 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
-        active && 'bg-accent font-medium text-accent-foreground',
-      )}
-    >
-      <IconCmp className="size-4 shrink-0" />
-      <span className="flex-1 truncate">{children}</span>
-      {aside}
-    </a>
-  )
-}
-
 const WT_OPEN = 'shipyard:sidebarWorktrees'
 const FINISHED_OPEN = 'shipyard:sidebarFinished'
 
@@ -427,10 +432,9 @@ function FinishedSection({ projects, current }: { projects: Project[]; current?:
         À aboutir · {total}
       </button>
       {open && groups.map((g) => (
-        <div key={g.project.id} className="flex flex-col gap-0.5">
-          <span className="px-2.5 pt-2 pb-0.5 text-[11px] text-muted-foreground/80">{g.project.name}</span>
+        <RailGroup key={g.project.id} group="clean" label={g.project.name} count={g.rows.length}>
           {g.rows.map((q) => <WorktreeRow key={q.key} item={q} projectId={g.project.id} pinned={false} />)}
-        </div>
+        </RailGroup>
       ))}
     </div>
   )
@@ -460,6 +464,7 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
   const active = rows.filter((r) => r.group !== 'clean')
   const pinnedIds = current ? pins.of(current.id) : []
   const pinned = pinnedIds.map((id) => rows.find((r) => r.worktree === id)).filter((r): r is QueueItem => !!r)
+  const groups = useNavGroups(GROUP_OF[route.page] ?? null)
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-col gap-3 p-3">
@@ -480,45 +485,34 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
       <nav aria-label="Navigation" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-3">
         {current && (
           <>
-            <NavLink to={href({ page: 'overview', project: current.id })} icon={HouseIcon} active={false}>
-              Accueil
-            </NavLink>
-            <div className="ml-[17px] flex shrink-0 flex-col gap-0.5 border-l pl-2">
+            <NavGroup {...groups.of('home')} icon={HouseIcon} label="Accueil" aside={<Notif n={todo} />}>
               {HOME_TABS.map(([tab, label]) => (
                 <SubLink key={label} to={href({ page: 'overview', project: current.id, tab })} active={route.page === 'overview' && route.tab === tab} aside={tab ? <span className="text-xs text-muted-foreground tabular-nums">{homeCounts[tab]}</span> : <Notif n={todo} />}>
                   {label}
                 </SubLink>
               ))}
-            </div>
-            <NavLink to={href({ page: 'insights', project: current.id })} icon={LightbulbIcon} active={route.page === 'insights'}>
-              Features & optimisations
-            </NavLink>
-            <NavLink to={href({ page: 'new-ticket', project: current.id })} icon={TicketPlusIcon} active={route.page === 'new-ticket'}>
-              Nouveau ticket
-            </NavLink>
-            <NavLink to={href({ page: 'precheck', project: current.id })} icon={ClipboardCheckIcon} active={route.page === 'precheck'}>
-              Pre-check
-            </NavLink>
+            </NavGroup>
+            <NavGroup {...groups.of('ticket')} icon={TicketIcon} label="Ticket">
+              <SubLink to={href({ page: 'new-ticket', project: current.id })} active={route.page === 'new-ticket'}>Nouveau ticket</SubLink>
+              <SubLink to={href({ page: 'precheck', project: current.id })} active={route.page === 'precheck'}>Pre-check</SubLink>
+              <SubLink to={href({ page: 'insights', project: current.id })} active={route.page === 'insights'}>Features & optimisations</SubLink>
+            </NavGroup>
           </>
         )}
-        <NavLink to={href({ page: 'automations' })} icon={ZapIcon} active={route.page === 'automations'}>
-          Automatisations
-        </NavLink>
-        <NavLink to={href({ page: 'notes' })} icon={StickyNoteIcon} active={route.page === 'notes'} aside={openNotes > 0 && <span className="text-xs text-muted-foreground tabular-nums">{openNotes}</span>}>
-          Notes
-        </NavLink>
-        <NavLink to={href({ page: 'daily' })} icon={CalendarDaysIcon} active={route.page === 'daily'}>
-          Daily
-        </NavLink>
-        <NavLink to={href({ page: 'stats' })} icon={ChartColumnIcon} active={route.page === 'stats'}>
-          Stats
-        </NavLink>
-        <NavLink to={href({ page: 'prompts' })} icon={FileTextIcon} active={route.page === 'prompts'} aside={modified > 0 && <span className="text-xs text-muted-foreground">{plural(modified, 'modifié', 'modifiés')}</span>}>
-          Prompts
-        </NavLink>
-        <NavLink to={href({ page: 'settings' })} icon={SettingsIcon} active={route.page === 'settings'}>
-          Réglages
-        </NavLink>
+        <NavGroup {...groups.of('follow')} icon={ChartColumnIcon} label="Suivi" aside={openNotes > 0 && <span className="text-xs text-muted-foreground tabular-nums">{openNotes}</span>}>
+          <SubLink to={href({ page: 'notes' })} active={route.page === 'notes'} aside={openNotes > 0 && <span className="text-xs text-muted-foreground tabular-nums">{openNotes}</span>}>Notes</SubLink>
+          <SubLink to={href({ page: 'daily' })} active={route.page === 'daily'}>Daily</SubLink>
+          <SubLink to={href({ page: 'stats' })} active={route.page === 'stats'}>Stats</SubLink>
+        </NavGroup>
+        <NavGroup {...groups.of('agents')} icon={BotIcon} label="Agents">
+          <SubLink to={href({ page: 'automations' })} active={route.page === 'automations'}>Automatisations</SubLink>
+          <SubLink to={href({ page: 'prompts' })} active={route.page === 'prompts'} aside={modified > 0 && <span className="text-xs text-muted-foreground">{plural(modified, 'modifié', 'modifiés')}</span>}>Prompts</SubLink>
+        </NavGroup>
+        <NavGroup {...groups.of('settings')} icon={SettingsIcon} label="Réglages">
+          {SETTINGS_LINKS.map(([section, label]) => (
+            <SubLink key={section} to={href({ page: 'settings', section })} active={route.page === 'settings' && route.section === section}>{label}</SubLink>
+          ))}
+        </NavGroup>
 
         {current && pinned.length > 0 && (
           <div className="mt-5 flex flex-col gap-0.5">
@@ -548,10 +542,9 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
               const list = rows.filter((r) => r.group === g.key && !pinnedIds.includes(r.worktree!))
               if (!list.length) return null
               return (
-                <div key={g.key} className="flex flex-col gap-0.5">
-                  <span className="px-2.5 pt-2 pb-0.5 text-[11px] text-muted-foreground/80">{g.label}</span>
+                <RailGroup key={g.key} group={g.key} label={g.label} count={list.length}>
                   {list.map((q) => <WorktreeRow key={q.key} item={q} projectId={current.id} pinned={false} />)}
-                </div>
+                </RailGroup>
               )
             })}
             {queue && !active.length && <p className="px-2.5 py-1 text-xs text-muted-foreground">Aucun worktree pour ce projet.</p>}
@@ -560,6 +553,65 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
 
         <FinishedSection projects={projects} current={current?.id} />
       </nav>
+    </div>
+  )
+}
+
+/** Cartes de la page Réglages : chaque entrée y mène et la déplie (#/settings/<carte>). */
+const SETTINGS_LINKS: [string, string][] = [['appearance', 'Apparence'], ['languages', 'Langues'], ['credentials', 'Connexions'], ['projects', 'Projets suivis'], ['groups', 'Projets liés'], ['labels', 'Labels reconnus'], ['notifications', 'Notifications']]
+
+type NavGroupKey = 'home' | 'ticket' | 'follow' | 'agents' | 'settings'
+/** Groupe du menu qui contient chaque page. */
+const GROUP_OF: Partial<Record<Route['page'], NavGroupKey>> = {
+  overview: 'home',
+  'new-ticket': 'ticket', precheck: 'ticket', insights: 'ticket',
+  notes: 'follow', daily: 'follow', stats: 'follow',
+  automations: 'agents', prompts: 'agents',
+  settings: 'settings',
+}
+const NAV_OPEN = 'shipyard:sidebarGroups'
+
+/**
+ * Groupes dépliés du menu : tous pliés par défaut, mémorisés dans ce navigateur.
+ * Celui de la page affichée s'ouvre quand on y arrive, pour toujours voir où l'on est.
+ */
+function useNavGroups(current: NavGroupKey | null) {
+  const [open, setOpen] = useState<string[]>(() => {
+    try {
+      const v: unknown = JSON.parse(localStorage.getItem(NAV_OPEN) ?? '[]')
+      return Array.isArray(v) ? v.map(String) : []
+    } catch {
+      return []
+    }
+  })
+  const save = (next: string[]) => {
+    try { localStorage.setItem(NAV_OPEN, JSON.stringify(next)) } catch { /* stockage indisponible */ }
+    return next
+  }
+  useEffect(() => {
+    if (current) setOpen((o) => (o.includes(current) ? o : save([...o, current])))
+  }, [current])
+  return {
+    of: (key: NavGroupKey) => ({
+      open: open.includes(key),
+      current: current === key,
+      onToggle: () => setOpen((o) => save(o.includes(key) ? o.filter((k) => k !== key) : [...o, key])),
+    }),
+  }
+}
+
+/** Grand titre du menu : un clic plie ou déplie ses entrées, sans changer de page. */
+function NavGroup({ icon: IconCmp, label, open, current, onToggle, aside, children }: { icon: LucideIcon; label: string; open: boolean; current: boolean; onToggle: () => void; aside?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex shrink-0 flex-col gap-0.5">
+      <button type="button" onClick={onToggle} aria-expanded={open}
+        className={cn('flex h-8 w-full shrink-0 items-center gap-2.5 rounded-md px-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground', current && !open && 'font-medium text-foreground')}>
+        <IconCmp className="size-4 shrink-0" />
+        <span className="flex-1 truncate text-left">{label}</span>
+        {!open && aside}
+        <ChevronRightIcon className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} />
+      </button>
+      {open && <div className="ml-[17px] flex shrink-0 flex-col gap-0.5 border-l pl-2">{children}</div>}
     </div>
   )
 }

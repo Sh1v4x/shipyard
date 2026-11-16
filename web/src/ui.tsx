@@ -21,7 +21,7 @@ import {
   XIcon,
   type LucideIcon,
 } from 'lucide-react'
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import type { CheckState, RunEvent, RunSummary, Severity, TicketStatusType } from '../../shared/types.ts'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge as UiBadge } from '@/components/ui/badge'
@@ -187,6 +187,59 @@ export const Dot = ({ color, className }: { color: string; className?: string })
 export const SectionLabel = ({ children, className }: { children: ReactNode; className?: string }) => (
   <span className={cn('mb-2 block text-xs font-medium text-muted-foreground', className)}>{children}</span>
 )
+
+/**
+ * Section dépliable d'un onglet, pliée par défaut. `active` (un agent y travaille) l'ouvre d'elle-même ;
+ * elle reste ensuite ouverte jusqu'à ce qu'on la replie. Le contenu replié garde son état (saisie, journal ouvert).
+ */
+export function FoldCard({ title, summary, icon: IconCmp, badge, actions, active = false, defaultOpen = false, className, children, ...props }: {
+  title: ReactNode
+  /** Ligne discrète sous le titre : ce que contient la section, lisible sans la déplier. */
+  summary?: ReactNode
+  icon?: LucideIcon
+  /** État de la section (en cours, à valider…), visible même repliée. */
+  badge?: ReactNode
+  /** Actions de l'en-tête, affichées seulement quand la section est dépliée. */
+  actions?: ReactNode
+  /** Un agent travaille dans cette section : elle s'ouvre. */
+  active?: boolean
+  defaultOpen?: boolean
+} & Omit<ComponentProps<'article'>, 'title'>) {
+  const [open, setOpen] = useState(defaultOpen || active)
+  const bodyId = useId()
+  useEffect(() => {
+    if (active) setOpen(true)
+  }, [active])
+  return (
+    <article className={cn('rounded-xl border bg-card', className)} {...props}>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pr-3">
+        <h2 className="flex min-w-0 flex-[1_1_240px]">
+          <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(!open)}
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-5 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+            <ChevronRightIcon className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden="true" />
+            {IconCmp && <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground"><IconCmp className="size-4" /></span>}
+            <span className="min-w-0">
+              <span className="block font-semibold break-words">{title}</span>
+              {summary && <span className={cn('mt-0.5 block text-sm font-normal text-muted-foreground', !open && 'truncate')}>{summary}</span>}
+            </span>
+          </button>
+        </h2>
+        {(badge || (open && actions)) && (
+          <span className="flex flex-wrap items-center gap-1 pb-3 pl-5 sm:pb-0 sm:pl-0">
+            {badge}
+            {open && actions}
+          </span>
+        )}
+      </div>
+      <div id={bodyId} hidden={!open}>
+        <div className="flex flex-col gap-4 border-t p-5">{children}</div>
+      </div>
+    </article>
+  )
+}
+
+/** Badge « En cours » d'une section où un agent travaille. */
+export const RunningBadge = () => <Badge tone="blue"><Spinner className="size-3" />En cours</Badge>
 
 /** Initiales d'un auteur GitHub dans un rond ; `ai` pour une note de l'agent. */
 export function Avatar({ login, ai, size = 'md' }: { login?: string; ai?: boolean; size?: 'sm' | 'md' }) {

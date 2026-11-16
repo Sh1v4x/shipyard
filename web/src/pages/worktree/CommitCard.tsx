@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import type { CommitExecOutput, CommitExecResult, CommitPlanOutput } from '../../../../shared/types.ts'
 import { useAction } from '../../data/runs.ts'
-import { Badge, PromptMenu, RunPanel, SectionLabel, Spinner, plural, type Tone } from '../../ui.tsx'
+import { Badge, FoldCard, PromptMenu, RunningBadge, RunPanel, SectionLabel, Spinner, plural, type Tone } from '../../ui.tsx'
 import type { TabProps } from '../Worktree.tsx'
 
 interface Draft {
@@ -47,19 +47,16 @@ export function CommitCard({ project, detail, wtId }: TabProps) {
   const report = exec.result
 
   return (
-    <article className="flex flex-col gap-4 rounded-xl border bg-card p-5" aria-label="Commiter">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-[1_1_320px] gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground"><GitCommitHorizontalIcon className="size-4" /></div>
-          <div className="min-w-0">
-            <h2 className="font-semibold">Commiter les changements</h2>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              {total ? `${plural(dirty.length, 'fichier modifié', 'fichiers modifiés')} dans le worktree${linked.length ? `, ${linked.map((l) => `${l.dirtyFiles.length} dans ${l.name}`).join(', ')} (worktree lié)` : ''}.` : 'Tout est commité.'} L’IA propose des commits, tu valides chacun, puis Shipyard commite et pousse. Si un hook (Biome, typecheck) refuse un commit, un agent le corrige et le commit est retenté.
-            </p>
-          </div>
-        </div>
-        <PromptMenu items={[['commit-plan', 'Commits']]} />
-      </div>
+    <FoldCard
+      aria-label="Commiter"
+      icon={GitCommitHorizontalIcon}
+      title="Commiter les changements"
+      summary={total ? `${plural(dirty.length, 'fichier modifié', 'fichiers modifiés')} dans le worktree${linked.length ? `, ${linked.map((l) => `${l.dirtyFiles.length} dans ${l.name}`).join(', ')} (worktree lié)` : ''}.` : 'Tout est commité.'}
+      active={plan.working || exec.working}
+      badge={plan.working || exec.working ? <RunningBadge /> : drafts ? <Badge tone="amber">{plural(drafts.length, 'commit à valider', 'commits à valider')}</Badge> : null}
+      actions={<PromptMenu items={[['commit-plan', 'Commits']]} />}
+    >
+      <p className="text-sm text-muted-foreground">L’IA propose des commits, tu valides chacun, puis Shipyard commite et pousse. Si un hook (Biome, typecheck) refuse un commit, un agent le corrige et le commit est retenté.</p>
 
       {total > 0 && !drafts && (
         <div>
@@ -101,7 +98,7 @@ export function CommitCard({ project, detail, wtId }: TabProps) {
         </div>
       )}
 
-      <RunPanel id={exec.id} events={exec.events} running={exec.running} run={exec.run} label="Commits et push en cours" defaultOpen={exec.running} onStop={exec.stop} action={exec} />
+      <RunPanel id={exec.id} events={exec.events} running={exec.running} run={exec.run} label="Commits et push en cours" defaultOpen={exec.working} onStop={exec.stop} action={exec} />
 
       {report && (
         <div className="flex flex-col gap-2">
@@ -125,6 +122,6 @@ export function CommitCard({ project, detail, wtId }: TabProps) {
           ))}
         </div>
       )}
-    </article>
+    </FoldCard>
   )
 }

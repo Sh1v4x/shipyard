@@ -1,11 +1,10 @@
-import { BotIcon, ChartColumnIcon, ChevronRightIcon, ChevronsUpDownIcon, FolderGit2Icon, HouseIcon, MenuIcon, PinIcon, PinOffIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, SearchIcon, SettingsIcon, ShipIcon, SquareIcon, TicketIcon, Trash2Icon, type LucideIcon } from 'lucide-react'
+import { BotIcon, ChartColumnIcon, GitBranchIcon, ChevronRightIcon, ChevronsUpDownIcon, FolderGit2Icon, HouseIcon, MenuIcon, PinIcon, PinOffIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, SearchIcon, SettingsIcon, ShipIcon, SquareIcon, TicketIcon, Trash2Icon, type LucideIcon } from 'lucide-react'
 import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import type { BrokenWorktree, Project, ProjectOverview, QueueGroup, QueueItem, QueueTone } from '../../shared/types.ts'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { useKillOrphan, useRefreshProject, useRepairWorktree } from './data/mutations.ts'
 import { usePrefetchWorktree, useInbox, useNotes, useProjectOverview, useProjectOverviews, useProjects, usePrompts, useQueue, useRunningRuns, useAgents, useBrokenWorktrees } from './data/queries.ts'
@@ -346,11 +345,11 @@ const RAIL: Record<QueueGroup, { text: string; line: string }> = {
 }
 
 /** Worktrees d'une même catégorie : libellé de sa couleur, et un filet de la même couleur le long des lignes qui en font partie. */
-function RailGroup({ group, label, count, children }: { group: QueueGroup; label: string; count: number; children: ReactNode }) {
+function RailGroup({ group, label, count, nested = false, children }: { group: QueueGroup; label: string; count: number; /** Sous un menu : un trait relie le libellé au filet du menu. */ nested?: boolean; children: ReactNode }) {
   const c = RAIL[group]
   return (
     <div className="flex shrink-0 flex-col">
-      <span className={cn('px-2.5 pt-2 pb-1 text-[11px] font-medium', c.text)}>{label} <span className="font-normal opacity-70">· {count}</span></span>
+      <span className={cn('relative px-2.5 pt-2 pb-1 text-[11px] font-medium', nested && 'pl-3.5 after:absolute after:bottom-[11px] after:left-0 after:h-px after:w-2.5 after:bg-border', c.text)}>{label} <span className="font-normal opacity-70">· {count}</span></span>
       <div className={cn('ml-3 flex flex-col gap-0.5 border-l-2 pl-0.5', c.line)}>{children}</div>
     </div>
   )
@@ -522,33 +521,23 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
         )}
 
         {current && (
-          <div className="mt-5 flex flex-col gap-0.5">
-            <div className="flex items-center justify-between pr-0.5">
-              <button type="button" onClick={toggleWt} aria-expanded={wtOpen} className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground">
-                <ChevronRightIcon className={cn('size-3.5 transition-transform', wtOpen && 'rotate-90')} />
-                Worktrees · {active.length}
-              </button>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" className="size-7" asChild>
-                    <a href={href({ page: 'create', project: current.id })} aria-label="Nouveau worktree"><PlusIcon /></a>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">Nouveau worktree</TooltipContent>
-              </Tooltip>
-            </div>
+          <NavGroup bare className={cn(pinned.length > 0 && 'mt-5')} icon={GitBranchIcon} label={<>Worktrees <span className="font-normal text-muted-foreground">· {active.length}</span></>}
+            open={wtOpen} onToggle={toggleWt} current={route.page === 'worktree' || route.page === 'create'}>
+            {/* Même filet que les sous-liens des autres menus : on voit que les catégories appartiennent à « Worktrees ». */}
+            <div className="ml-[17px] flex shrink-0 flex-col border-l pb-1">
             {loading && <span className="flex items-center gap-2 px-2.5 py-1 text-xs text-muted-foreground"><Spinner className="size-3.5" />Chargement…</span>}
-            {wtOpen && QUEUE_GROUPS.filter((g) => g.key !== 'clean').map((g) => {
+            {QUEUE_GROUPS.filter((g) => g.key !== 'clean').map((g) => {
               const list = rows.filter((r) => r.group === g.key && !pinnedIds.includes(r.worktree!))
               if (!list.length) return null
               return (
-                <RailGroup key={g.key} group={g.key} label={g.label} count={list.length}>
+                <RailGroup key={g.key} nested group={g.key} label={g.label} count={list.length}>
                   {list.map((q) => <WorktreeRow key={q.key} item={q} projectId={current.id} pinned={false} />)}
                 </RailGroup>
               )
             })}
             {queue && !active.length && <p className="px-2.5 py-1 text-xs text-muted-foreground">Aucun worktree pour ce projet.</p>}
-          </div>
+            </div>
+          </NavGroup>
         )}
 
         <FinishedSection projects={projects} current={current?.id} />
@@ -569,11 +558,11 @@ const GROUP_OF: Partial<Record<Route['page'], NavGroupKey>> = {
   automations: 'agents', prompts: 'agents',
   settings: 'settings',
 }
-const NAV_OPEN = 'shipyard:sidebarGroups'
+const NAV_OPEN = 'shipyard:sidebarMenus'
 
 /**
- * Groupes dépliés du menu : tous pliés par défaut, mémorisés dans ce navigateur.
- * Celui de la page affichée s'ouvre quand on y arrive, pour toujours voir où l'on est.
+ * Groupes dépliés du menu : tous pliés par défaut (seul « Worktrees », géré à part, est ouvert), mémorisés dans ce navigateur.
+ * Un groupe ne s'ouvre que sur un clic ; plié, celui de la page affichée a son titre en évidence.
  */
 function useNavGroups(current: NavGroupKey | null) {
   const [open, setOpen] = useState<string[]>(() => {
@@ -588,9 +577,6 @@ function useNavGroups(current: NavGroupKey | null) {
     try { localStorage.setItem(NAV_OPEN, JSON.stringify(next)) } catch { /* stockage indisponible */ }
     return next
   }
-  useEffect(() => {
-    if (current) setOpen((o) => (o.includes(current) ? o : save([...o, current])))
-  }, [current])
   return {
     of: (key: NavGroupKey) => ({
       open: open.includes(key),
@@ -601,9 +587,20 @@ function useNavGroups(current: NavGroupKey | null) {
 }
 
 /** Grand titre du menu : un clic plie ou déplie ses entrées, sans changer de page. */
-function NavGroup({ icon: IconCmp, label, open, current, onToggle, aside, children }: { icon: LucideIcon; label: string; open: boolean; current: boolean; onToggle: () => void; aside?: ReactNode; children: ReactNode }) {
+function NavGroup({ icon: IconCmp, label, open, current, onToggle, aside, bare = false, className, children }: {
+  icon: LucideIcon
+  label: ReactNode
+  open: boolean
+  current: boolean
+  onToggle: () => void
+  aside?: ReactNode
+  /** Contenu sans le filet des sous-liens : il apporte sa propre mise en page (catégories de worktrees). */
+  bare?: boolean
+  className?: string
+  children: ReactNode
+}) {
   return (
-    <div className="flex shrink-0 flex-col gap-0.5">
+    <div className={cn('flex shrink-0 flex-col gap-0.5', className)}>
       <button type="button" onClick={onToggle} aria-expanded={open}
         className={cn('flex h-8 w-full shrink-0 items-center gap-2.5 rounded-md px-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground', current && !open && 'font-medium text-foreground')}>
         <IconCmp className="size-4 shrink-0" />
@@ -611,7 +608,7 @@ function NavGroup({ icon: IconCmp, label, open, current, onToggle, aside, childr
         {!open && aside}
         <ChevronRightIcon className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} />
       </button>
-      {open && <div className="ml-[17px] flex shrink-0 flex-col gap-0.5 border-l pl-2">{children}</div>}
+      {open && (bare ? children : <div className="ml-[17px] flex shrink-0 flex-col gap-0.5 border-l pl-2">{children}</div>)}
     </div>
   )
 }

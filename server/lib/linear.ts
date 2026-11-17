@@ -1,4 +1,4 @@
-import type { CreatedTicket, LabelRole, LinearMeta, NewIssue, Ticket, TicketState, TicketStatusType } from '../../shared/types.ts'
+import type { CreatedTicket, LabelRole, LinearMeta, NewIssue, QuickAssignee, QuickUrgency, Ticket, TicketState, TicketStatusType } from '../../shared/types.ts'
 import { matchesRole } from '../../shared/review.ts'
 import { ttlCache } from './exec.ts'
 import { labelRules } from './settings.ts'
@@ -82,6 +82,38 @@ export function teamTickets(teamKey: string, force = false): Promise<Ticket[]> {
     },
     force,
   )
+}
+
+/** Au-delà, la liste est tronquée (les plus récemment modifiés d'abord) : resserrer le filtre. */
+const TODO_LIMIT = 300
+
+/**
+ * Tickets de l'équipe qui restent à démarrer (triage, backlog, à faire), filtrés par label et par priorité.
+ * `free` : ceux sans personne ou à moi ; `all` : ceux de toute l'équipe. Jamais mis en cache : la sélection part de l'état du moment.
+ */
+export async function todoTickets(teamKey: string, opts: { label?: string; urgency: QuickUrgency; assignee: QuickAssignee }): Promise<{ tickets: Ticket[]; truncated: boolean }> {
+  const me = await getViewerId()
+  const filter: Record<string, unknown> = {
+    team: { key: { eq: teamKey } },
+    state: { type: { in: ['triage', 'backlog', 'unstarted'] } },
+    ...(opts.label ? { labels: { name: { eqIgnoreCase: opts.label } } } : {}),
+    // Linear : 1 = urgente, 2 = haute.
+    ...(opts.urgency === 'urgent' ? { priority: { eq: 1 } } : opts.urgency === 'high' ? { priority: { in: [1, 2] } } : {}),
+    ...(opts.assignee === 'free' ? { or: [{ assignee: { null: true } }, { assignee: { id: { eq: me } } }] } : {}),
+  }
+  const tickets: Ticket[] = []
+  let after: string | null = null
+  let more = false
+  do {
+    const data: { issues: { nodes: IssueNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await query(
+      `query($filter:IssueFilter!,$after:String){issues(first:100,after:$after,orderBy:updatedAt,filter:$filter){nodes{${ISSUE_FIELDS}} pageInfo{hasNextPage endCursor}}}`,
+      { filter, after },
+    )
+    tickets.push(...data.issues.nodes.map((i) => toTicket(i, me)))
+    more = data.issues.pageInfo.hasNextPage
+    after = data.issues.pageInfo.endCursor
+  } while (more && after && tickets.length < TODO_LIMIT)
+  return { tickets: tickets.slice(0, TODO_LIMIT), truncated: more || tickets.length > TODO_LIMIT }
 }
 
 const ticketCache = ttlCache<Ticket | null>(60_000)

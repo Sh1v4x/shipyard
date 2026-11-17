@@ -21,6 +21,7 @@ describe('schémas des sorties structurées', () => {
     expectTypeOf<Aligned<typeof S.findingsFixAllSchema, T.FindingsFixAllAgentOutput>>().toEqualTypeOf<true>()
     expectTypeOf<Aligned<typeof S.ciAllSchema, T.CiAllOutput>>().toEqualTypeOf<true>()
     expectTypeOf<Aligned<typeof S.insightsSchema, T.InsightsOutput>>().toEqualTypeOf<true>()
+    expectTypeOf<Aligned<typeof S.quickTicketsSchema, T.QuickTicketsOutput>>().toEqualTypeOf<true>()
     expectTypeOf<Aligned<typeof S.followupSchema, T.FollowupOutput>>().toEqualTypeOf<true>()
     expectTypeOf<Aligned<typeof S.prPrepareSchema, T.PrPrepareOutput>>().toEqualTypeOf<true>()
     expectTypeOf<Aligned<typeof S.commentReplySchema, T.CommentReplyOutput>>().toEqualTypeOf<true>()

@@ -1,4 +1,4 @@
-import { BotIcon, ChartColumnIcon, GitBranchIcon, ChevronRightIcon, ChevronsUpDownIcon, FolderGit2Icon, HouseIcon, MenuIcon, PinIcon, PinOffIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, SearchIcon, SettingsIcon, ShipIcon, SquareIcon, TicketIcon, Trash2Icon, type LucideIcon } from 'lucide-react'
+import { BotIcon, ChartColumnIcon, EyeIcon, GitBranchIcon, GitPullRequestIcon, ChevronRightIcon, ChevronsUpDownIcon, FolderGit2Icon, HouseIcon, MenuIcon, PinIcon, PinOffIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, SearchIcon, SettingsIcon, ShipIcon, SquareIcon, TicketIcon, Trash2Icon, type LucideIcon } from 'lucide-react'
 import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import type { BrokenWorktree, Project, ProjectOverview, QueueGroup, QueueItem, QueueTone } from '../../shared/types.ts'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,7 @@ import { StatusBar } from './components/StatusBar.tsx'
 import { ChecklistMini } from './pages/worktree/checklist.tsx'
 import { AddProjectPage } from './pages/AddProject.tsx'
 import { OverviewPage } from './pages/Overview.tsx'
-import { AutomationsPage, CreateWorktreePage, DailyPage, InboxPage, StatsPage, InsightsPage, NewTicketPage, NotesPage, PrecheckPage, PromptsPage, SettingsPage, WorktreePage, loadWorktreePage } from './pages/lazy.ts'
+import { AutomationsPage, CreateWorktreePage, DailyPage, InboxPage, StatsPage, InsightsPage, NewTicketPage, NotesPage, PrecheckPage, PromptsPage, QuickTicketsPage, SettingsPage, WorktreePage, loadWorktreePage } from './pages/lazy.ts'
 import { go, href, useRoute, type Route } from './router.ts'
 import { ThemeToggle } from './theme.tsx'
 import { Notif, Spinner, plural, worktreeTitle, useToast } from './ui.tsx'
@@ -63,10 +63,14 @@ export function App() {
   }, [pending])
   const todo = current ? queueCount(overview.data?.queue, inbox.data, current.id) : 0
   const sidebar = <Sidebar projects={projects.data ?? []} current={current} todo={todo} loading={overview.isLoading} />
+  const sidebarWidth = useSidebarWidth()
 
   return (
     <div className="flex min-h-svh pb-[72px]">
-      <aside className="sticky top-0 hidden h-[calc(100svh-72px)] w-72 shrink-0 border-r bg-sidebar md:block">{sidebar}</aside>
+      <aside className="sticky top-0 hidden h-[calc(100svh-72px)] shrink-0 border-r bg-sidebar md:block" style={{ width: sidebarWidth.width }}>
+        {sidebar}
+        <SidebarResizer {...sidebarWidth} />
+      </aside>
       <Sheet open={mobileNav} onOpenChange={setMobileNav}>
         <SheetContent side="left" className="w-72 bg-sidebar p-0">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
@@ -84,6 +88,7 @@ export function App() {
           {route.page === 'insights' && current && <InsightsPage key={current.id} project={current} mode={route.mode} />}
           {route.page === 'new-ticket' && current && <NewTicketPage key={current.id} project={current} />}
           {route.page === 'precheck' && current && <PrecheckPage key={`${current.id}:${route.ticket ?? ''}`} project={current} ticket={route.ticket} />}
+          {route.page === 'quick' && current && <QuickTicketsPage key={current.id} project={current} />}
           {route.page === 'add-project' && <AddProjectPage />}
           {route.page === 'prompts' && <PromptsPage selected={route.key} />}
           {route.page === 'inbox' && <InboxPage />}
@@ -112,6 +117,7 @@ const PAGE_TITLES: Record<Route['page'], string> = {
   insights: 'Features & optimisations',
   'new-ticket': 'Nouveau ticket',
   precheck: 'Pre-check',
+  quick: 'Tickets rapides',
   'add-project': 'Ajouter un projet',
   prompts: 'Prompts',
   inbox: 'À valider',
@@ -329,8 +335,77 @@ function ProjectMenuItem({ project, active, onPick }: { project: Project; active
 
 // ---------- Barre latérale ----------
 
+const SIDEBAR_WIDTH = 'shipyard:sidebarWidth'
+const SIDEBAR = { min: 220, max: 520, initial: 288, step: 16 }
+const clampSidebar = (w: number) => Math.min(SIDEBAR.max, Math.max(SIDEBAR.min, Math.round(w)))
+
+/** Largeur de la barre latérale (écran large), réglable et mémorisée dans ce navigateur. */
+function useSidebarWidth() {
+  const [width, setWidth] = useState(() => {
+    try {
+      const v = Number(localStorage.getItem(SIDEBAR_WIDTH))
+      return v ? clampSidebar(v) : SIDEBAR.initial
+    } catch {
+      return SIDEBAR.initial
+    }
+  })
+  const set = (w: number) => {
+    const next = clampSidebar(w)
+    setWidth(next)
+    try { localStorage.setItem(SIDEBAR_WIDTH, String(next)) } catch { /* stockage indisponible */ }
+  }
+  return { width, set }
+}
+
+/**
+ * Poignée sur le bord droit de la barre latérale : on la tire pour réduire ou agrandir, un double-clic revient à la
+ * largeur d'origine, et les flèches gauche / droite la règlent au clavier.
+ */
+function SidebarResizer({ width, set }: { width: number; set: (w: number) => void }) {
+  const [dragging, setDragging] = useState(false)
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: un séparateur réglable n'a pas d'élément HTML dédié.
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Largeur de la barre latérale"
+      aria-valuemin={SIDEBAR.min}
+      aria-valuemax={SIDEBAR.max}
+      aria-valuenow={width}
+      tabIndex={0}
+      title="Tire pour réduire ou agrandir · double-clic pour revenir à la largeur d’origine"
+      className={cn('absolute top-0 -right-1 z-40 h-full w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-primary after:opacity-0 after:transition-opacity hover:after:opacity-60 focus-visible:after:opacity-60', dragging && 'after:opacity-100')}
+      onPointerDown={(e) => {
+        e.preventDefault()
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setDragging(true)
+      }}
+      onPointerMove={(e) => {
+        // La barre est collée au bord gauche de la fenêtre : la position du pointeur est sa largeur.
+        if (dragging) set(e.clientX)
+      }}
+      onPointerUp={() => setDragging(false)}
+      onPointerCancel={() => setDragging(false)}
+      onDoubleClick={() => set(SIDEBAR.initial)}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowLeft') set(width - SIDEBAR.step)
+        else if (e.key === 'ArrowRight') set(width + SIDEBAR.step)
+        else if (e.key === 'Home') set(SIDEBAR.initial)
+        else return
+        e.preventDefault()
+      }}
+    />
+  )
+}
+
+
 const DOT: Record<QueueTone, string> = {
   red: 'bg-red-500', amber: 'bg-amber-500', purple: 'bg-violet-500', blue: 'bg-blue-500', green: 'bg-emerald-500', gray: 'bg-muted-foreground/40',
+}
+
+/** Même couleur d'état que la pastille, pour l'icône d'une PR (la mienne ou une review). */
+const ICON_TONE: Record<QueueTone, string> = {
+  red: 'text-red-500', amber: 'text-amber-500', purple: 'text-violet-500', blue: 'text-blue-500', green: 'text-emerald-500', gray: 'text-muted-foreground',
 }
 
 /** Couleur de chaque catégorie de la file, dans la barre latérale : le libellé et le filet qui longe ses worktrees. */
@@ -382,8 +457,11 @@ function WorktreeRow({ item, projectId, pinned }: { item: QueueItem; projectId: 
           </button>
         ) : <span className="size-5 shrink-0" aria-hidden />}
         <a href={href({ page: 'worktree', project: projectId, wt })} onMouseEnter={warm} onFocus={warm} aria-current={active ? 'page' : undefined}
-          title={[item.title, ...item.reasons.map((r) => r.label)].join(' · ')} className="flex min-w-0 flex-1 items-center gap-2">
-          <span className={cn('size-2 shrink-0 rounded-full', DOT[item.tone])} aria-hidden />
+          title={[item.kind === 'mine' ? 'Ma PR' : item.kind === 'review' ? 'Review' : null, item.title, ...item.reasons.map((r) => r.label)].filter(Boolean).join(' · ')} className="flex min-w-0 flex-1 items-center gap-2">
+          {/* La forme dit ce que c'est (ma PR, une review), la couleur garde l'état de la ligne. */}
+          {item.kind === 'mine' ? <GitPullRequestIcon className={cn('size-3.5 shrink-0', ICON_TONE[item.tone])} aria-label="Ma PR" />
+            : item.kind === 'review' ? <EyeIcon className={cn('size-3.5 shrink-0', ICON_TONE[item.tone])} aria-label="Review" />
+            : <span className={cn('mx-[3px] size-2 shrink-0 rounded-full', DOT[item.tone])} aria-hidden />}
           <span className="min-w-0 flex-1 truncate">{item.title}</span>
           {item.ref && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{item.ref}</span>}
         </a>
@@ -494,6 +572,7 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
             <NavGroup {...groups.of('ticket')} icon={TicketIcon} label="Ticket">
               <SubLink to={href({ page: 'new-ticket', project: current.id })} active={route.page === 'new-ticket'}>Nouveau ticket</SubLink>
               <SubLink to={href({ page: 'precheck', project: current.id })} active={route.page === 'precheck'}>Pre-check</SubLink>
+              <SubLink to={href({ page: 'quick', project: current.id })} active={route.page === 'quick'}>Tickets rapides</SubLink>
               <SubLink to={href({ page: 'insights', project: current.id })} active={route.page === 'insights'}>Features & optimisations</SubLink>
             </NavGroup>
           </>
@@ -553,7 +632,7 @@ type NavGroupKey = 'home' | 'ticket' | 'follow' | 'agents' | 'settings'
 /** Groupe du menu qui contient chaque page. */
 const GROUP_OF: Partial<Record<Route['page'], NavGroupKey>> = {
   overview: 'home',
-  'new-ticket': 'ticket', precheck: 'ticket', insights: 'ticket',
+  'new-ticket': 'ticket', precheck: 'ticket', quick: 'ticket', insights: 'ticket',
   notes: 'follow', daily: 'follow', stats: 'follow',
   automations: 'agents', prompts: 'agents',
   settings: 'settings',

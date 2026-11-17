@@ -11,6 +11,7 @@ export type Route =
   | { page: 'insights'; project: string; mode?: string }
   | { page: 'new-ticket'; project: string }
   | { page: 'precheck'; project: string; ticket?: string }
+  | { page: 'quick'; project: string }
   | { page: 'add-project' }
   | { page: 'prompts'; key?: string }
   | { page: 'notes' }
@@ -28,6 +29,7 @@ export function parse(hash: string): Route {
     if (s[2] === 'automations') return { page: 'automations' }
     if (s[2] === 'insights') return { page: 'insights', project: s[1], mode: s[3] }
     if (s[2] === 'precheck') return { page: 'precheck', project: s[1], ticket: s[3] }
+    if (s[2] === 'quick') return { page: 'quick', project: s[1] }
     if (s[2] === 'ticket') return { page: 'new-ticket', project: s[1] }
     if (s[2] === 'new') return { page: 'create', project: s[1], ticket: q.get('ticket') ?? undefined, mode: q.get('mode') ?? undefined }
     return { page: 'overview', project: s[1], tab: s[2] }
@@ -66,6 +68,8 @@ export function href(r: Route): string {
       return `#/p/${r.project}/ticket`
     case 'precheck':
       return `#/p/${r.project}/precheck${r.ticket ? `/${encodeURIComponent(r.ticket)}` : ''}`
+    case 'quick':
+      return `#/p/${r.project}/quick`
     case 'add-project':
       return '#/add-project'
     case 'prompts':

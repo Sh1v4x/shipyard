@@ -627,6 +627,10 @@ export interface ActionInput {
   until?: string
   /** Re-test d'un travail (resumeFrom) : captures et vérifications refaites, code inchangé. */
   retest?: boolean
+  /** Tickets rapides : label Linear exigé (absent : tous), priorité minimale et tickets pris en compte. */
+  label?: string
+  urgency?: QuickUrgency
+  assignee?: QuickAssignee
   /** Features & optimisations : type d'analyse, et digest forcé en carte. */
   insights?: InsightsMode
   digest?: 'auto' | 'map'
@@ -652,6 +656,7 @@ export type ActionKind =
   | 'branch-name'
   | 'ticket-draft'
   | 'precheck'
+  | 'quick-tickets'
   | 'daily'
   | 'conflict-resolve'
   | 'merge-finish'
@@ -716,6 +721,41 @@ export interface DigestInfo {
 }
 
 export type InsightsMode = 'features' | 'improve' | 'review'
+
+/** Tickets rapides : `any` toutes priorités, `high` haute et urgente, `urgent` urgente seulement. */
+export type QuickUrgency = 'any' | 'high' | 'urgent'
+/** Tickets rapides : `free` ceux sans personne ou à moi, `all` ceux de toute l'équipe. */
+export type QuickAssignee = 'free' | 'all'
+
+/** Ticket retenu par « Tickets rapides » : parmi les moins longs de la liste, d'après le ticket entier et le code. */
+export interface QuickPick {
+  id: string
+  title: string
+  /** Lien, priorité et labels du ticket : remis d'après Linear par le serveur. */
+  url: string
+  priority: string
+  labels: string[]
+  /** Dépôt où se fait le travail (nom du projet). */
+  repo: string
+  size: 'XS' | 'S' | 'M' | 'L' | 'XL'
+  /** Temps pour le terminer, en fourchette (ex. « 1 à 2 h », « 2 à 3 jours »). */
+  effort: string
+  confidence: 'faible' | 'moyenne' | 'forte'
+  /** Pourquoi il est parmi les moins longs : ce que le code montre. */
+  why: string
+  /** Ce qu'il faut faire, en quelques étapes. */
+  approach: string
+  files: string[]
+  risk: string
+}
+
+export interface QuickTicketsOutput {
+  summary: string
+  /** Nombre de tickets examinés. */
+  examined: number
+  /** Du plus rapide au moins rapide. */
+  picks: QuickPick[]
+}
 
 /** Proposition de l'analyse « Features & optimisations ». */
 export interface InsightItem {

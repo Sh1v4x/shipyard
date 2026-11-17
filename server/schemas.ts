@@ -311,6 +311,37 @@ export const insightsSchema = {
   required: ['summary', 'items'],
 } as const
 
+export const quickTicketsSchema = {
+  type: 'object',
+  properties: {
+    summary: s('3 to 5 sentences: what the candidate tickets look like, how you ranked them, the order to take them in, what you left out and why'),
+    examined: { type: 'number', description: 'How many candidate tickets you examined' },
+    picks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: s('Ticket identifier, exactly as in the list (e.g. ENG-142)'),
+          title: s('Ticket title, as in the list'),
+          url: s('Ticket link, as in the list'),
+          priority: s('Ticket priority, as in the list'),
+          labels: { type: 'array', items: { type: 'string' } },
+          repo: s('Name of the repository where the work happens'),
+          size: { type: 'string', enum: ['XS', 'S', 'M', 'L', 'XL'] },
+          effort: s('Time to close it as a range (e.g. "1 à 2 h", "une demi-journée", "2 à 3 jours")'),
+          confidence: { type: 'string', enum: ['faible', 'moyenne', 'forte'] },
+          why: s('Why it is among the least long of the list, backed by what you saw in the code'),
+          approach: s('What to do, in a few concrete steps'),
+          files: { type: 'array', items: { type: 'string' } },
+          risk: s('What could make it longer than expected, or empty'),
+        },
+        required: ['id', 'title', 'url', 'priority', 'labels', 'repo', 'size', 'effort', 'confidence', 'why', 'approach', 'files', 'risk'],
+      },
+    },
+  },
+  required: ['summary', 'examined', 'picks'],
+} as const
+
 export const followupSchema = {
   type: 'object',
   properties: {

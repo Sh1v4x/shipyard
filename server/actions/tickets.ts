@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, renameSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { BranchAskOutput, Run, InsightsMode, PrecheckOutput, TicketDraftOutput, TicketPlanOutput, TicketWorkOutput } from '../../shared/types.ts'
-import { HttpError, loadProjects } from '../lib/config.ts'
+import type { BranchAskOutput, Run, InsightsMode, PrecheckOutput, QuickAssignee, QuickTicketsOutput, QuickUrgency, TicketDraftOutput, TicketPlanOutput, TicketWorkOutput } from '../../shared/types.ts'
+import { DATA_DIR, HttpError, loadProjects } from '../lib/config.ts'
 import { getRun, listRuns, setRunDecision, startRun } from '../lib/claude.ts'
 import { run } from '../lib/exec.ts'
 import * as git from '../lib/git.ts'
@@ -204,7 +204,76 @@ export const ticketsActions: WorktreeActions = {
   'branch-ask': askAction,
 }
 
+/** Listes de tickets données à lire à l'agent de « Tickets rapides » (une par run). */
+const QUICK_DIR = join(DATA_DIR, 'quick-tickets')
+
+const QUICK_URGENCY: Record<QuickUrgency, string> = {
+  any: 'any priority',
+  high: 'only tickets with a High or Urgent priority',
+  urgent: 'only tickets with an Urgent priority',
+}
+const QUICK_ASSIGNEE: Record<QuickAssignee, string> = {
+  free: 'tickets assigned to nobody or to the user',
+  all: 'tickets of the whole team, whoever they are assigned to',
+}
+
 export const ticketsProjectActions: ProjectActions = {
+  /**
+   * Tickets rapides : tous les tickets à démarrer de l'équipe qui passent le filtre (label, priorité) sont donnés en
+   * entier à l'agent dans un fichier ; il les vérifie dans le code et classe les moins longs à faire. Il en rend
+   * toujours : je dois en prendre de toute façon, même quand aucun n'est petit.
+   */
+  'quick-tickets': async ({ kind, input, project }) => {
+    const { linearConfigured, todoTickets } = await import('../lib/linear.ts')
+    if (!linearConfigured()) throw new HttpError(400, 'Linear n’est pas connecté (Réglages › Connexions)')
+    if (!project.team) throw new HttpError(400, 'Aucune équipe Linear configurée pour ce projet')
+    const label = input.label?.trim() || undefined
+    const urgency = input.urgency ?? 'any'
+    const assignee = input.assignee ?? 'free'
+    const { tickets, truncated } = await todoTickets(project.team, { label, urgency, assignee })
+    if (!tickets.length) throw new HttpError(409, 'Aucun ticket à démarrer ne correspond à ces critères')
+    const byId = new Map(tickets.map((t) => [t.id, t]))
+    const id = randomUUID()
+    mkdirSync(QUICK_DIR, { recursive: true })
+    const listPath = join(QUICK_DIR, `${id}.md`)
+    writeFileSync(listPath, tickets.map((t) => [
+      `## ${t.id} · ${t.title}`,
+      `Link: ${t.url}`,
+      `Priority: ${t.priority} · Status: ${t.status} · Assignee: ${t.assignee ?? 'nobody'} · Labels: ${t.labels.join(', ') || 'none'}`,
+      '',
+      // Description entière : l'estimation se joue souvent dans ses dernières lignes (questions, dépendances).
+      t.description.trim() || '(no description)',
+    ].join('\n')).join('\n\n---\n\n'))
+    const grouped = groupedProjects(project).filter((p) => existsSync(p.path))
+    return startRun(
+      specFrom('quick-tickets', {
+        'project.name': project.name,
+        repo: project.repo,
+        team: project.team,
+        'tickets.path': listPath,
+        'tickets.count': tickets.length,
+        'tickets.note': truncated ? `The list is cut at ${tickets.length} tickets (the most recently updated): more match the filter.` : '',
+        'filter.label': label ?? 'any label',
+        'filter.urgency': QUICK_URGENCY[urgency],
+        'filter.assignee': QUICK_ASSIGNEE[assignee],
+        consigne: input.extra?.trim() || 'none',
+        others: grouped.length ? grouped.map((p) => `  - ${p.name} (${p.repo}): ${p.path}`).join('\n') : '  (none)',
+      }, {
+        id, kind, title: `Tickets rapides · ${project.name}`, scope: { project: project.id }, cwd: project.path,
+        schema: schemas.quickTicketsSchema, addDirs: [QUICK_DIR, ...grouped.map((p) => p.path)], request: input.extra?.trim() || null,
+        onSuccess: async (run) => {
+          const out = run.structured as QuickTicketsOutput | null
+          if (!out) return
+          // Seuls les tickets de la liste comptent, avec leurs vraies données Linear (lien, priorité, labels).
+          out.picks = out.picks.flatMap((p) => {
+            const t = byId.get(p.id.trim().toUpperCase())
+            return t ? [{ ...p, id: t.id, title: t.title, url: t.url, priority: t.priority, labels: t.labels }] : []
+          })
+          out.examined = tickets.length
+        },
+      }),
+    )
+  },
   'branch-name': async ({ kind, input, project }) => {
     const { ticketById } = await import('../lib/linear.ts')
     const t = input.ticketId ? await ticketById(input.ticketId) : null

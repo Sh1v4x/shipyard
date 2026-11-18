@@ -1,5 +1,3 @@
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
 import type { SdkStatus, WorktreeDetail } from '../../shared/types.ts'
 import type { JobContext } from '../lib/claude.ts'
 import { run } from '../lib/exec.ts'
@@ -9,21 +7,9 @@ import { HookRefused, commitAndPush, hookOutput, toBlocked } from './commitFlow.
 import { sleep } from './context.ts'
 import { warnOn } from '../lib/log.ts'
 
-/**
- * Remet node_modules d'accord avec le lockfile (celui de la fusion) avant un commit de fusion : le typecheck du hook
- * tourne sur node_modules, et une fusion apporte souvent des dépendances nouvelles ou plus récentes (SDK privé compris,
- * lu avec le jeton de gh). Un échec n'arrête rien : le hook dira ce qui manque.
- */
-export async function installDeps(cwd: string, log: (text: string) => void) {
-  if (!existsSync(join(cwd, 'package.json'))) return
-  const pm = packageManager(cwd)
-  log(`Dépendances : ${pm} install (accord avec le lockfile de la fusion)…`)
-  const env = { ...process.env, NODE_AUTH_TOKEN: await gh.authToken().catch(() => ''), PATH: `${process.env.HOME}/.bun/bin:${process.env.PATH}` }
-  await run(pm, ['install'], { cwd, timeoutMs: 600_000, env }).then(
-    () => log('Dépendances à jour.'),
-    (e) => log(`Installation des dépendances en échec, le commit est tenté quand même :\n${hookOutput(e).split('\n').slice(-10).join('\n')}`),
-  )
-}
+// Avant un commit de fusion : le typecheck du hook tourne sur node_modules, et une fusion apporte souvent des
+// dépendances nouvelles ou plus récentes.
+export { installDeps } from '../lib/envRepair.ts'
 
 /** Installe la version donnée d'un paquet GitHub Packages (contrainte ^version), sans commiter. Jeton de gh en NODE_AUTH_TOKEN. */
 async function installSdk(ctx: JobContext, cwd: string, name: string, version: string) {

@@ -11,7 +11,9 @@ import { awaitsReview, needsChanges, needsRerequest, needsTesting, repoLabelsWit
 import { applyGhosts, buildQueue } from '../shared/queue.ts'
 import { ghostsOf } from './lib/ghosts.ts'
 import { labelRules } from './lib/settings.ts'
-import { setTicketLink, ticketLinks } from './lib/ticketLinks.ts'
+import { extraTicketLinks, setExtraTickets, setTicketLink, ticketLinks } from './lib/ticketLinks.ts'
+import { coversTicket, worktreeTicketIds } from '../shared/text.ts'
+import { clearPostmanVars, setPostmanLink } from './lib/postmanLinks.ts'
 import { linkWorktrees, linksOf, unlinkWorktree } from './lib/worktreeLinks.ts'
 import { clearSdkCache } from './lib/sdk.ts'
 import { allLocalTickets, localTicketOf, moveLocalTicket, orphanLocalTickets, removeLocalTicket, saveLocalTicket } from './lib/localTickets.ts'
@@ -213,7 +215,14 @@ async function loadOverview(project: Project, force: boolean): Promise<ProjectOv
       continue
     }
     const done = closed.get(wt.branch)
-    if (done?.state === 'MERGED') wt.merged = { number: done.number, title: done.title, url: done.url, mergedAt: done.mergedAt }
+    // Ma PR de cette branche est mergée, ou fermée sans merge : dans les deux cas le worktree n'a plus d'objet.
+    if (done) wt.merged = { number: done.number, title: done.title, url: done.url, mergedAt: done.mergedAt, state: done.state }
+  }
+  // Tickets associés à la main : une fois le ticket principal connu (branche, lien ou PR), il n'y figure pas en double.
+  const extraLinks = extraTicketLinks()
+  for (const wt of worktrees) {
+    const extra = (extraLinks[wt.path] ?? []).filter((id) => id !== wt.ticketId)
+    if (extra.length) wt.extraTicketIds = extra
   }
   // Review d'une PR mergée ou fermée : plus rien à traiter, elle sort de la vue (le nettoyage propose de supprimer le worktree).
   // Review d'une PR mergée ou fermée : plus rien à reviewer, le worktree passe dans « Mergées · à nettoyer » pour être supprimé.
@@ -227,7 +236,7 @@ async function loadOverview(project: Project, force: boolean): Promise<ProjectOv
   // Tickets liés à un worktree mais absents de « mes tickets » (assignés à quelqu'un d'autre).
   const tickets = [...teamTickets]
   if (linear.linearConfigured()) {
-    const missingTickets = [...new Set(worktrees.map((w) => w.ticketId).filter((id): id is string => !!id && !tickets.some((t) => t.id === id)))]
+    const missingTickets = [...new Set(worktrees.flatMap(worktreeTicketIds).filter((id) => !tickets.some((t) => t.id === id)))]
     const extra = await Promise.all(missingTickets.map((id) => linear.ticketById(id, force).catch(warnOn('linear.ticketById', null))))
     tickets.push(...extra.filter((t): t is Ticket => !!t))
   }
@@ -242,7 +251,10 @@ async function loadOverview(project: Project, force: boolean): Promise<ProjectOv
   const conflicts = mine.filter((p) => p.conflicts).length
   const changes = mine.filter((p) => needsChanges(p, rules)).length
   // Reviews à faire : demandées sur GitHub, ou PR déjà reviewées que l'auteur a remises en « Waiting review ».
-  const toReview = [...new Set([...requested.map((p) => p.number), ...openReviewPrs.filter((p) => awaitsReview(p, rules)).map((p) => p.number)])]
+  // Dans un dépôt qui a un label « review demandée », c'est lui qui dit que la PR est prête à relire : être mis en
+  // reviewer sans ce label (PR encore en cours, CodeRabbit dessus…) n'est pas encore une tâche pour moi.
+  const usesReviewLabel = repoLabelsWithRole(rules, 'awaitingReview', await gh.repoLabels(project.repo).catch(warnOn('gh.repoLabels', [] as string[]))).length > 0
+  const toReview = [...new Set([...requested.filter((p) => !usesReviewLabel || awaitsReview(p, rules)).map((p) => p.number), ...openReviewPrs.filter((p) => awaitsReview(p, rules)).map((p) => p.number)])]
   const reviews = toReview.length
   const login = await gh.me().catch(warnOn('gh.me', null))
   // Seul contributeur humain : la liste des membres du dépôt, sans moi ni les bots, est vide. En cas de doute, non.
@@ -304,6 +316,9 @@ export async function worktreeDetail(project: Project, wtId: string, force = fal
   const ticket = worktree.ticketId
     ? (!force && ov.tickets.find((t) => t.id === worktree.ticketId)) || (linear.linearConfigured() ? await linear.ticketById(worktree.ticketId, force).catch(warnOn('linear.ticketById', null)) : null)
     : null
+  const extraTickets = (await Promise.all((worktree.extraTicketIds ?? []).map(async (id) =>
+    (!force && ov.tickets.find((t) => t.id === id)) || (linear.linearConfigured() ? await linear.ticketById(id, force).catch(warnOn('linear.ticketById', null)) : null),
+  ))).filter((t): t is Ticket => !!t)
   const pr = worktree.prNumber ? await gh.prByNumber(project.repo, worktree.prNumber, force) : null
   if (pr) pr.timeline = await gh.prTimeline(project.repo, pr.number, force).catch(warnOn('gh.prTimeline', undefined))
   const base = pr?.base ?? project.baseBranch
@@ -325,7 +340,7 @@ export async function worktreeDetail(project: Project, wtId: string, force = fal
   const linked = await Promise.all((await linkedWorktrees(worktree)).map(async (l) => ({
     project: l.project.id, name: l.project.name, id: l.worktree.id, path: l.worktree.path, branch: l.worktree.branch, dirtyFiles: await git.dirtyFiles(l.worktree.path).catch(() => []),
   })))
-  return { project, worktree, ticket, pr, commitsAhead, dirtyFiles, merge, behindBase, behindRemote, remoteAuthors, linked, solo: ov.solo, tests: testsSummary(wtId), selfReview: selfReviewSummary(wtId) }
+  return { project, worktree, ticket, extraTickets, pr, commitsAhead, dirtyFiles, merge, behindBase, behindRemote, remoteAuthors, linked, solo: ov.solo, tests: testsSummary(wtId), selfReview: selfReviewSummary(wtId) }
 }
 
 /**
@@ -333,7 +348,7 @@ export async function worktreeDetail(project: Project, wtId: string, force = fal
  * base, puis liés entre eux pour que plan, travail et review portent sur l'ensemble. Un worktree déjà créé pour ce
  * ticket dans un projet est repris tel quel.
  */
-export async function createTicketWorktrees(project: Project, input: { ticketId: string; branch: string; projects: string[] }): Promise<{ project: string; id: string }[]> {
+export async function createTicketWorktrees(project: Project, input: { ticketId?: string; extraTickets?: string[]; branch: string; projects: string[] }): Promise<{ project: string; id: string }[]> {
   const targets = [...new Set(input.projects)].map(getProject)
   if (!targets.length) throw new HttpError(400, 'Aucun projet choisi')
   for (const t of targets) {
@@ -341,8 +356,13 @@ export async function createTicketWorktrees(project: Project, input: { ticketId:
   }
   const out: { project: string; id: string; path: string }[] = []
   for (const t of targets) {
-    const existing = (await overview(t)).worktrees.find((w) => w.ticketId === input.ticketId)
-    const wt = existing ?? (await createWorktree(t, { mode: 'ticket', branch: input.branch, base: t.baseBranch, ticketId: input.ticketId }))
+    // Sans ticket (modification rapide) : le worktree se reconnaît à sa branche.
+    const ticketId = input.ticketId
+    const existing = (await overview(t)).worktrees.find((w) => (ticketId ? coversTicket(w, ticketId) : w.branch === input.branch))
+    const wt = existing ?? (await createWorktree(t, { mode: ticketId ? 'ticket' : 'new', branch: input.branch, base: t.baseBranch, ticketId }))
+    // Tickets faits avec lui : associés à chaque worktree, repris ou créé.
+    const extra = (input.extraTickets ?? []).filter((id) => !existing || !coversTicket(existing, id))
+    if (extra.length) setExtraTickets(wt.path, [...(extraTicketLinks()[wt.path] ?? []), ...extra].filter((id) => id !== (existing?.ticketId ?? input.ticketId)))
     out.push({ project: t.id, id: wt.id, path: wt.path })
   }
   const [first, ...rest] = out
@@ -369,6 +389,10 @@ export async function createWorktree(project: Project, input: CreateWorktreeInpu
   const base = input.base?.trim() || project.baseBranch
   if (mode === 'new') await assertBase(project, base)
   const path = await git.addWorktree(project, { dir, branch, mode, base, prNumber: input.prNumber })
+  // Tickets liés au ticket choisi, faits avec lui : associés dès la création.
+  if (input.mode === 'ticket' && input.ticketId && input.extraTickets?.length) {
+    setExtraTickets(path, input.extraTickets.map((id) => id.toUpperCase()).filter((id) => id !== input.ticketId))
+  }
   return { path, id: Buffer.from(path).toString('base64url') }
 }
 
@@ -382,8 +406,36 @@ export async function linkTicket(project: Project, wtId: string, ticketId: strin
     if (linear.linearConfigured() && !(await linear.ticketById(id).catch(() => null))) throw new HttpError(404, `Ticket introuvable sur Linear : ${id}`)
   }
   setTicketLink(path, id)
+  // Un ticket associé qui devient le principal ne reste pas dans les deux listes.
+  if (id) setExtraTickets(path, (extraTicketLinks()[path] ?? []).filter((x) => x !== id))
   overviews.delete(project.id)
   return { ticketId: id }
+}
+
+/**
+ * Ajoute un ticket à un worktree : il devient son ticket principal s'il n'en a pas, sinon il s'y associe (deux tickets
+ * liés, faits dans la même branche et la même PR).
+ */
+export async function addTicket(project: Project, wtId: string, ticketId: string): Promise<{ ticketId: string; extra: boolean }> {
+  const { worktree } = await projectWorktree(project, wtId)
+  const id = ticketId.trim().toUpperCase()
+  if (!/^[A-Z][A-Z0-9]*-\d+$/.test(id)) throw new HttpError(400, `Identifiant de ticket invalide : ${id}`)
+  if (coversTicket(worktree, id)) throw new HttpError(409, `${id} est déjà sur ce worktree`)
+  if (!worktree.ticketId) {
+    await linkTicket(project, wtId, id)
+    return { ticketId: id, extra: false }
+  }
+  if (linear.linearConfigured() && !(await linear.ticketById(id).catch(() => null))) throw new HttpError(404, `Ticket introuvable sur Linear : ${id}`)
+  setExtraTickets(worktree.path, [...(worktree.extraTicketIds ?? []), id])
+  overviews.delete(project.id)
+  return { ticketId: id, extra: true }
+}
+
+/** Retire un ticket associé : le ticket lui-même garde son statut dans Linear. */
+export function removeExtraTicket(project: Project, wtId: string, ticketId: string) {
+  const path = decodeId(wtId)
+  setExtraTickets(path, (extraTicketLinks()[path] ?? []).filter((x) => x !== ticketId.trim().toUpperCase()))
+  overviews.delete(project.id)
 }
 
 /** Supprime le worktree (refusé par git s'il reste des changements non commités). La branche est conservée. */
@@ -395,6 +447,9 @@ export async function removeWorktree(project: Project, wtId: string) {
   if (dirty.length) throw new HttpError(409, `${dirty.length} fichier(s) non commité(s) dans ce worktree : commite ou annule-les avant de le supprimer.`)
   await git.removeWorktree(project, path)
   unlinkWorktree({ project: project.id, path })
+  setPostmanLink(path, null)
+  clearPostmanVars(path)
+  setExtraTickets(path, [])
 }
 
 // ---------- Tickets locaux (Features & optimisations) ----------
@@ -478,6 +533,7 @@ export async function moveWorktree(project: Project, wtId: string, targetId: str
   const created = await createWorktree(target, { mode: ticketId ? 'ticket' : 'new', branch: wt.branch, ticketId: ticketId ?? undefined })
     .catch(() => createWorktree(target, { mode: 'existing', branch: wt.branch! }))
   if (linked) setTicketLink(created.path, linked)
+  if (wt.extraTicketIds?.length) setExtraTickets(created.path, wt.extraTicketIds)
   moveLocalTicket(path, { path: created.path, project: target.id })
   await removeWorktree(project, wtId)
   setTicketLink(path, null)
@@ -529,24 +585,29 @@ export async function linkedWorktrees(wt: Worktree): Promise<LinkedWorktree[]> {
  * Aboutit un worktree dont la PR est mergée : passe son ticket Linear dans l'état terminé de l'équipe (« Done »),
  * puis supprime le worktree. Refusé avant toute écriture s'il reste des changements non commités.
  */
-export async function finishWorktree(project: Project, wtId: string): Promise<{ ticket: { id: string; state: string } | null }> {
+export async function finishWorktree(project: Project, wtId: string): Promise<{ ticket: { id: string; state: string } | null; tickets: { id: string; state: string }[] }> {
   const path = decodeId(wtId)
   const wt = (await overview(project)).worktrees.find((w) => w.path === path)
   if (!wt) throw new HttpError(404, `Worktree introuvable : ${path}`)
   const [dirty, merge] = await Promise.all([git.dirtyFiles(path), git.mergeState(path)])
   if (merge) throw new HttpError(409, `Une fusion de ${merge.base ?? 'la base'} est en cours dans ce worktree : valide-la ou annule-la dans l’onglet Conflits avant de l'aboutir.`)
   if (dirty.length) throw new HttpError(409, `${dirty.length} fichier(s) non commité(s) dans ce worktree : commite ou annule-les avant de l'aboutir.`)
-  let ticket: { id: string; state: string } | null = null
-  // Le ticket d'une review appartient à son auteur : on n'y touche pas.
-  if (wt.kind !== 'review' && wt.ticketId && project.team && linear.linearConfigured()) {
+  const tickets: { id: string; state: string }[] = []
+  // Le ticket d'une review appartient à son auteur : on n'y touche pas. Une PR fermée sans merge n'a rien livré :
+  // son ticket n'est pas terminé, il garde son statut.
+  const ids = worktreeTicketIds(wt)
+  if (wt.kind !== 'review' && wt.merged?.state !== 'CLOSED' && ids.length && project.team && linear.linearConfigured()) {
     const states = await linear.teamStates(project.team)
     const done = states.find((s) => s.type === 'completed' && /^done$/i.test(s.name)) ?? states.find((s) => s.type === 'completed')
     if (!done) throw new HttpError(400, `Aucun état « terminé » dans l'équipe Linear ${project.team}`)
-    await linear.setTicketState(wt.ticketId, done.id)
-    ticket = { id: wt.ticketId, state: done.name }
+    // La PR livre tous les tickets du worktree : chacun passe en Done.
+    for (const id of ids) {
+      await linear.setTicketState(id, done.id)
+      tickets.push({ id, state: done.name })
+    }
   }
   await removeWorktree(project, wtId)
-  return { ticket }
+  return { ticket: tickets[0] ?? null, tickets }
 }
 
 /**

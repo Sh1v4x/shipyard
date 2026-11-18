@@ -66,7 +66,10 @@ export async function listWorktreeCleanup(project: Project): Promise<WorktreeCle
 
       const ticketId = w.ticketId ?? (pr && !reviewNum ? mine.find((p) => p.number === pr!.number)?.ticketId ?? null : null)
       const t = ticketId && linear.linearConfigured() ? await linear.ticketById(ticketId).catch(warnOn('linear.ticketById', null)) : null
-      const ticket = t ? { id: t.id, status: t.status, done: t.statusType === 'completed' || t.statusType === 'canceled' } : null
+      // Tickets associés au worktree : tant que l'un d'eux reste ouvert, le worktree sert encore.
+      const extras = t && linear.linearConfigured() ? await Promise.all((w.extraTicketIds ?? []).map((id) => linear.ticketById(id).catch(warnOn('linear.ticketById', null)))) : []
+      const over = (x: { statusType: string } | null) => x?.statusType === 'completed' || x?.statusType === 'canceled'
+      const ticket = t ? { id: t.id, status: t.status, done: over(t) && extras.every(over) } : null
 
       const days = last ? (Date.now() - Date.parse(last)) / 86_400_000 : 0
       let suggestion: WorktreeCleanupInfo['suggestion'] = 'keep'

@@ -51,6 +51,13 @@ Return the complete report via StructuredOutput, in the same format as the previ
 - summary: what was done (taken from the previous report), then what the retest showed, in 3 to 5 sentences;
 - changes: copied as they are from the previous report;
 - checks: the checks redone, with pass, fail or skip and the detail. Keep the "Règles de dev" check from the previous report;
+- proofs: the evidence that it works, as real command output the user can read without rerunning anything. One entry per thing proven: title, command (as typed) and output (copied as is, never rewritten or summarized, the useful lines only, 60 at most).
+  - Logic with no visible effect (a calculation, a rule, a parser, an API, a job, a migration) always has at least one proof: the screenshots cannot show it works, so the output must.
+  - Run the tests with the reporter that lists every case (verbose), so each case appears by name with its result, not only "11 pass".
+  - When the change produces values (amounts, rates, dates, counts, a status), the output shows them: for each case the input, the expected value and the value obtained. If the test runner does not print them, add them to the test names or run a short script that prints the table, and give that output.
+  - An API or a command is proven by calling it: the request and the response.
+  - An output you typed yourself is not a proof. Never write the expected and obtained values by hand, never describe what a command would print: if no command you ran printed these values, run one that does (a short script calling the code, printing one line per case) and copy what it printed. command is the exact command, complete enough to be rerun.
+  - Empty only when the change is purely visual and the screenshots prove it.
 - screenshots: for each screen, name, platform (web or android), description, before and after (file names, or null if the screenshot is missing);
 - appNote: how the app was started (ports, database, data created), or why it could not be;
 - risks: what remains fragile or could not be verified;

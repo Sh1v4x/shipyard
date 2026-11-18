@@ -1,7 +1,7 @@
 import { useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type {
   ActionKind, ActionsBlock, DiffLine, AgentProcesses, BrokenWorktree, CheckReport, SdkStatus, DigestInfo, LocalTicket, BranchInfo, ClaudeUsage, Credentials, InboxItem, Note, Settings, CreatedTicket, LinearMeta, PendingReview, PrFiles, Project, ProjectOverview, PromptInfo, PromptSource, PromptVersion, ReviewDecisions, StatsReport, StatsScope, ReviewThread,
-  ManualEnv, GeneralComment, ReviewBranchState, ReviewerCandidate, Run, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
+  ManualEnv, GeneralComment, PostmanApplied, PostmanFolder, PostmanRef, PostmanState, ReviewBranchState, ReviewerCandidate, Run, RunSummary, RunVideo, TicketState, WorktreeCleanupInfo, WorktreeDetail, WorktreeStat,
 } from '../../../shared/types.ts'
 import { DEFAULT_LABEL_RULES } from '../../../shared/review.ts'
 import { inboxToQueue, queueCount } from '../../../shared/queue.ts'
@@ -11,7 +11,7 @@ import { qk } from './keys.ts'
 export const wtPath = (project: string, wt: string) => `/projects/${project}/worktrees/${wt}`
 
 export const useHealth = () =>
-  useQuery({ queryKey: qk.health, queryFn: () => api<{ github: string | null; linear: boolean; claude: string | null }>('/health'), staleTime: 300_000 })
+  useQuery({ queryKey: qk.health, queryFn: () => api<{ github: string | null; linear: boolean; postman: boolean; claude: string | null }>('/health'), staleTime: 300_000 })
 
 export const useProjects = () => useQuery({ queryKey: qk.projects, queryFn: () => api<Project[]>('/projects'), staleTime: 300_000 })
 
@@ -146,6 +146,7 @@ function detailFromOverview(qc: QueryClient, project: string, wt: string): Workt
     project: ov.project,
     worktree,
     ticket: ov.tickets.find((t) => t.id === worktree.ticketId) ?? null,
+    extraTickets: ov.tickets.filter((t) => worktree.extraTicketIds?.includes(t.id)),
     pr,
     commitsAhead: [],
     dirtyFiles: [],
@@ -208,13 +209,37 @@ export const useChecks = (project: string, wt: string, enabled = true) =>
     queryKey: qk.checks(project, wt),
     queryFn: () => api<CheckReport[]>(`${wtPath(project, wt)}/checks`),
     enabled,
-    // Un rapport en retard sur le dernier commit va être réécrit par son bot : on le guette.
-    refetchInterval: (q) => (q.state.data?.some((r) => r.stale) ? 30_000 : false),
+    // Un rapport en retard sur le dernier commit va être réécrit par son bot : on le guette. Sinon on relit quand même
+    // chaque minute : un push (le mien, ou celui d'un agent) rend le rapport affiché périmé sans que la page le sache.
+    refetchInterval: (q) => (q.state.data?.some((r) => r.stale) ? 30_000 : 60_000),
   })
 
 /** SDK privés (GitHub Packages) dont dépend le worktree, et leur état de publication. */
 export const useSdkStatus = (project: string, wt: string, enabled = true) =>
   useQuery({ queryKey: qk.sdk(project, wt), queryFn: () => api<SdkStatus[]>(`${wtPath(project, wt)}/sdk`), enabled, staleTime: 60_000 })
+
+// ---------- Postman ----------
+
+/** Dossier Postman lié au worktree et ses requêtes. */
+export const usePostman = (project: string, wt: string) =>
+  useQuery({ queryKey: qk.postman(project, wt), queryFn: () => api<PostmanState>(`${wtPath(project, wt)}/postman`), staleTime: 30_000 })
+
+// Listes pour choisir un dossier : chargées à la demande, gardées 5 minutes (Postman limite ces appels).
+export const usePostmanWorkspaces = (enabled: boolean) =>
+  useQuery({ queryKey: qk.postmanWorkspaces, queryFn: () => api<PostmanRef[]>('/postman/workspaces'), enabled, staleTime: 300_000 })
+
+export const usePostmanCollections = (workspace: string | null) =>
+  useQuery({ queryKey: qk.postmanCollections(workspace ?? ''), queryFn: () => api<PostmanRef[]>(`/postman/workspaces/${workspace}/collections`), enabled: !!workspace, staleTime: 300_000 })
+
+export const usePostmanFolders = (collection: string | null) =>
+  useQuery({ queryKey: qk.postmanFolders(collection ?? ''), queryFn: () => api<PostmanFolder[]>(`/postman/collections/${collection}/folders`), enabled: !!collection, staleTime: 30_000 })
+
+export const usePostmanEnvironments = (workspace: string | null, enabled = true) =>
+  useQuery({ queryKey: qk.postmanEnvironments(workspace ?? ''), queryFn: () => api<PostmanRef[]>(`/postman/workspaces/${workspace}/environments`), enabled: enabled && !!workspace, staleTime: 300_000 })
+
+/** Propositions d'un run déjà écrites dans Postman. */
+export const usePostmanApplied = (run: string | null) =>
+  useQuery({ queryKey: qk.postmanApplied(run), queryFn: () => api<PostmanApplied[]>(`/runs/${run}/postman-applied`), enabled: !!run })
 
 export const usePendingReview = (project: string, wt: string, enabled = true) =>
   useQuery({ queryKey: qk.pendingReview(project, wt), queryFn: () => api<PendingReview | null>(`${wtPath(project, wt)}/review/pending`), enabled })

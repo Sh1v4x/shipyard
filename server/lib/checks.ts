@@ -39,7 +39,9 @@ function metrics(text: string): CheckReport['metrics'] {
 }
 
 export function parseReport(c: gh.BotComments['comments'][number], head: gh.BotComments['head']): CheckReport | null {
-  if (/coderabbit/i.test(c.author)) return null
+  // Pas des contrôles : CodeRabbit a sa place dans Commentaires, et le commentaire de Linear n'est que le lien vers
+  // le ticket (il ne suit pas les commits, on l'attendrait pour rien).
+  if (/coderabbit|^linear/i.test(c.author)) return null
   const id = c.body.match(MARKER)?.[1]
   if (!id) return null
   const body = stripHtml(c.body)

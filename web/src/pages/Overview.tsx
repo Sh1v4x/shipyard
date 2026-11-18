@@ -1,3 +1,4 @@
+import { coversTicket } from '../../../shared/text.ts'
 import { ArrowUpRightIcon, ChevronRightIcon, GhostIcon, GitBranchIcon, PlusIcon, XIcon } from 'lucide-react'
 import { useState } from 'react'
 import { LinkWorktree } from '../components/LinkTicket.tsx'
@@ -211,7 +212,7 @@ function QueueRow({ item: q, project, pr }: { item: QueueItem; project: Project;
   )
 }
 
-type Wts = { id: string; ticketId: string | null; prNumber: number | null; branch: string | null }[]
+type Wts = { id: string; ticketId: string | null; extraTicketIds?: string[]; prNumber: number | null; branch: string | null }[]
 
 /** Conteneur commun des tables de la vue d'ensemble. */
 const TableCard = ({ children }: { children: React.ReactNode }) => <div className="overflow-hidden rounded-xl border bg-card shadow-xs">{children}</div>
@@ -236,7 +237,7 @@ function TicketsTable({ project, tickets, worktrees, filter, setFilter, linear }
             <TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Titre</TableHead><TableHead>Statut</TableHead><TableHead>Priorité</TableHead><TableHead>Mis à jour</TableHead><TableHead>Worktree</TableHead></TableRow></TableHeader>
             <TableBody>
               {rows.map((t) => {
-                const w = worktrees.find((x) => x.ticketId === t.id)
+                const w = worktrees.find((x) => coversTicket(x, t.id))
                 return (
                   <TableRow key={t.id}>
                     <TableCell className="font-mono text-[13px] font-medium"><a href={t.url} target="_blank" rel="noreferrer" className="hover:underline">{t.id}</a></TableCell>

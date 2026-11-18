@@ -5,6 +5,7 @@ import { ROOT } from './config.ts'
 import { run } from './exec.ts'
 import * as gh from './github.ts'
 import * as linear from './linear.ts'
+import * as postman from './postman.ts'
 
 // Clés de connexion, réglables depuis l'interface : enregistrées dans .env.local (jamais commité)
 // et appliquées tout de suite, sans redémarrer le serveur.
@@ -50,14 +51,17 @@ async function claudeStatus(): Promise<Credentials['claude']> {
 export async function getCredentials(): Promise<Credentials> {
   const key = process.env.LINEAR_API_KEY
   const token = process.env.GH_TOKEN
-  const [linearUser, githubLogin, claude] = await Promise.all([
+  const postmanKey = process.env.POSTMAN_API_KEY
+  const [linearUser, githubLogin, postmanUser, claude] = await Promise.all([
     key ? linear.checkLinearKey(key).then((v) => v.name).catch(() => null) : Promise.resolve(null),
     gh.me().catch(() => null),
+    postmanKey ? postman.me().catch(() => null) : Promise.resolve(null),
     claudeStatus(),
   ])
   return {
     linear: { configured: !!key, hint: hint(key), user: linearUser },
     github: { source: token ? 'token' : 'gh', hint: hint(token), login: githubLogin },
+    postman: { configured: !!postmanKey, hint: hint(postmanKey), user: postmanUser },
     claude,
   }
 }
@@ -86,4 +90,11 @@ export async function setGithubToken(token: string | null) {
   if (token) await gh.checkGithubToken(token.trim())
   setEnv('GH_TOKEN', token?.trim() || null)
   gh.resetGithub()
+}
+
+/** Vérifie puis enregistre la clé Postman ; null la retire (l'onglet Postman disparaît des worktrees). */
+export async function setPostmanKey(key: string | null) {
+  if (key) await postman.checkPostmanKey(key.trim())
+  setEnv('POSTMAN_API_KEY', key?.trim() || null)
+  postman.resetPostman()
 }

@@ -133,6 +133,10 @@ export const ciActions: WorktreeActions = {
     const pr = needPr()
     const jobs = input.ciJobs ?? []
     if (!jobs.length) throw new HttpError(400, 'Aucun diagnostic à corriger')
+    // Un diagnostic ne vaut que pour un job encore en échec : corriger d'après une analyse d'un ancien run ne mène à rien.
+    const failing = pr.ci.jobs.filter((j) => j.state === 'fail').flatMap((j) => [j.name, `${j.workflow ?? ''} › ${j.name}`])
+    const stale = jobs.filter((j) => !failing.includes(j.name)).map((j) => j.name)
+    if (stale.length) throw new HttpError(409, `Diagnostic périmé : ${stale.join(', ')} ${stale.length > 1 ? 'ne sont plus' : 'n’est plus'} en échec sur le dernier run. Relance l’analyse des échecs actuels.`)
     return startRun(
       specFrom('ci-fix-all', {
         rules: rulesFor(d.project.id),
@@ -142,9 +146,14 @@ export const ciActions: WorktreeActions = {
         kind, title: `Corriger ${jobs.length} job(s) CI`, scope: { ...scope, pr: pr.number, ref: 'all' }, cwd, schema: schemas.fixSchema,
         onSuccess: async (run) => {
           const out = run.structured as FixOutput
-          if (!out.changed) return
+          if (!out.changed) {
+            run.events.push({ t: 'info', text: `Rien n’a été modifié ni poussé : ${out.summary}` })
+            return
+          }
           const url = await commitAndPush(d, out.commitTitle).catch((e) => blockOnRefusal(run, e, out.commitTitle))
-          run.events.push({ t: 'info', text: url ? `Commit poussé, la CI va se relancer : ${url}` : 'Aucun changement à commiter.' })
+          // Correction annoncée mais aucun fichier modifié : le run ne doit pas finir en vert, la CI ne changera pas.
+          if (!url) throw new Error(`L’agent annonce une correction, mais aucun fichier n’est modifié : rien n’a été commité ni poussé. ${out.summary}`)
+          run.events.push({ t: 'info', text: `Commit poussé, la CI va se relancer : ${url}` })
         },
       }),
     )
@@ -162,17 +171,23 @@ export const ciActions: WorktreeActions = {
     )
   },
   'ci-fix': async ({ kind, input, d, scope, cwd, needPr }) => {
-    needPr()
+    const pr = needPr()
     const job = input.job
     if (!job || !input.ci) throw new HttpError(400, 'Diagnostic CI manquant')
+    if (!pr.ci.jobs.some((j) => j.state === 'fail' && (job.jobId ? j.jobId === job.jobId : j.name === job.name))) throw new HttpError(409, `Diagnostic périmé : ${job.name} n’est plus en échec sur le dernier run. Relance l’analyse.`)
     return startRun(
       specFrom('ci-fix', { rules: rulesFor(d.project.id), 'job.name': job.name, 'ci.cause': input.ci.cause, 'ci.fix': input.ci.fix }, {
         kind, title: `Corriger ${job.name}`, scope: { ...scope, ref: job.jobId ?? job.name }, cwd, schema: schemas.fixSchema,
         onSuccess: async (run) => {
           const out = run.structured as FixOutput
-          if (!out.changed) return
+          if (!out.changed) {
+            run.events.push({ t: 'info', text: `Rien n’a été modifié ni poussé : ${out.summary}` })
+            return
+          }
           const url = await commitAndPush(d, out.commitTitle).catch((e) => blockOnRefusal(run, e, out.commitTitle))
-          run.events.push({ t: 'info', text: url ? `Commit poussé, la CI va se relancer : ${url}` : 'Aucun changement à commiter.' })
+          // Correction annoncée mais aucun fichier modifié : le run ne doit pas finir en vert, la CI ne changera pas.
+          if (!url) throw new Error(`L’agent annonce une correction, mais aucun fichier n’est modifié : rien n’a été commité ni poussé. ${out.summary}`)
+          run.events.push({ t: 'info', text: `Commit poussé, la CI va se relancer : ${url}` })
         },
       }),
     )

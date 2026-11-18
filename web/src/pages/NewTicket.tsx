@@ -15,7 +15,7 @@ import { useCreatedTickets, useLinearMeta, useProjectOverviews, useProjects } fr
 import { useAction } from '../data/runs.ts'
 import { go, href } from '../router.ts'
 import { Badge, ErrorBox, Pill, PromptMenu, RunPanel, Spinner, plural, useToast } from '../ui.tsx'
-import { slugify } from '../../../shared/text.ts'
+import { coversTicket, slugify } from '../../../shared/text.ts'
 
 const PRIORITIES = [[0, 'Aucune'], [1, 'Urgente'], [2, 'Haute'], [3, 'Normale'], [4, 'Basse']] as const
 
@@ -96,7 +96,7 @@ export function NewTicketPage({ project }: { project: Project }) {
   const edit = (i: number, patch: Partial<Form>) => setEdits({ ...edits, [i]: { ...forms[i], ...patch } })
   const toCreate = forms.map((f, i) => ({ f, i })).filter(({ f, i }) => f.include && !done.some((d) => d.index === i))
   // Ticket créé : ses worktrees (un par dépôt choisi), ou la branche à créer d'après le nom proposé par l'IA (feat/ENG-12-bank-sync).
-  const worktreeOf = (repo: string, ticketId: string) => overviews.data.find((o) => o.project.id === repo)?.worktrees.find((w) => w.ticketId === ticketId)?.id ?? null
+  const worktreeOf = (repo: string, ticketId: string) => overviews.data.find((o) => o.project.id === repo)?.worktrees.find((w) => coversTicket(w, ticketId))?.id ?? null
   const branchOf = (i: number, ticketId: string) => {
     const t = out?.tickets[i]
     return t?.branch ? `${t.type === 'Bug' ? 'fix' : 'feat'}/${ticketId}-${slugify(t.branch)}` : null

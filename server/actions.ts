@@ -14,6 +14,7 @@ import { commentsActions } from './actions/comments.ts'
 import { commitsActions } from './actions/commits.ts'
 import { conflictsActions } from './actions/conflicts.ts'
 import { dailyAction } from './actions/daily.ts'
+import { postmanActions } from './actions/postman.ts'
 import { reviewActions } from './actions/review.ts'
 import { sdkActions } from './actions/sdk.ts'
 import { testsActions } from './actions/tests.ts'
@@ -29,6 +30,7 @@ const WORKTREE_ACTIONS: WorktreeActions = {
   ...testsActions,
   ...ciActions,
   ...sdkActions,
+  ...postmanActions,
 }
 
 export async function startAction(kind: ActionKind, input: ActionInput): Promise<Run> {
@@ -97,30 +99,32 @@ export async function abandonAgent(project: Project, wtId: string, ids: { plan?:
 /** Ce que le pre-check a établi, donné au travail comme consigne : l'agent du worktree ne reprend pas sa session. */
 function precheckBrief(run: Run, out: PrecheckOutput): string {
   return [
-    run.request?.trim() ? `The user's instructions for this ticket:\n${run.request.trim()}` : '',
-    'A pre-check already explored the code for this ticket and the user approved its plan. Rely on what it established (verify a path before reusing it), do not redo the whole exploration.',
+    run.request?.trim() ? `${run.kind === 'quick-change' ? 'The change the user asked for' : "The user's instructions for this ticket"}:\n${run.request.trim()}` : '',
+    'A pre-check already explored the code for this work and the user approved its plan. Rely on what it established (verify a path before reusing it), do not redo the whole exploration.',
     `Feasibility: ${out.feasibility.verdict}. ${out.feasibility.details}`,
     out.feasibility.blockers.length ? `Blockers raised (settled with the user unless the plan says otherwise):\n${out.feasibility.blockers.map((b) => `- ${b}`).join('\n')}` : '',
     `Estimated size: ${out.estimate.size} (${out.estimate.effort}). ${out.estimate.rationale}`,
     out.findings.trim() ? `What the pre-check found in the code:\n${out.findings.trim()}` : '',
-    out.questions.length ? `Questions left open (pick the reading closest to the ticket and say so in your audit):\n${out.questions.map((q) => `- ${q}`).join('\n')}` : '',
+    out.questions.length ? `Questions left open (pick the reading closest to the request and say so in your audit):\n${out.questions.map((q) => `- ${q}`).join('\n')}` : '',
   ].filter(Boolean).join('\n\n')
 }
 
 /**
- * Approuve un pre-check : crée la branche et le worktree du ticket (un par dépôt choisi, liés entre eux), puis
- * lance le travail dans celui du projet, sur le plan du pre-check et avec ce qu'il a établi.
+ * Approuve un pre-check (ou le plan d'une modification rapide, sans ticket) : crée la branche et le worktree (un par
+ * dépôt choisi, liés entre eux), puis lance le travail dans celui du projet, sur ce plan et avec ce qu'il a établi.
  */
 export async function approvePrecheck(project: Project, runId: string, input: { branch: string; projects: string[] }): Promise<{ project: string; worktree: string; run: string }> {
   const run = getRun(runId)
-  if (run?.kind !== 'precheck' || run.scope.project !== project.id || !run.scope.ref) throw new HttpError(404, 'Pre-check introuvable')
+  if ((run?.kind !== 'precheck' && run?.kind !== 'quick-change') || run.scope.project !== project.id || !run.scope.ref) throw new HttpError(404, 'Pre-check introuvable')
+  // Modification rapide : pas de ticket, le worktree part d'une branche neuve et le travail est une modification libre.
+  const quick = run.kind === 'quick-change'
   const out = run.structured as PrecheckOutput | null
   if (run.status !== 'success' || !out) throw new HttpError(409, 'Ce pre-check n’a pas abouti : relance-le avant d’approuver')
   // Le travail démarre dans le projet du pre-check : il fait toujours partie des dépôts.
-  const created = await createTicketWorktrees(project, { ticketId: run.scope.ref, branch: input.branch, projects: [project.id, ...input.projects] })
+  const created = await createTicketWorktrees(project, { ticketId: quick ? undefined : run.scope.ref, extraTickets: quick ? undefined : run.input?.extraTickets, branch: input.branch, projects: [project.id, ...input.projects] })
   const worktree = created.find((c) => c.project === project.id)!.id
   const workInput: ActionInput = { project: project.id, worktree, planRunId: run.id, extra: precheckBrief(run, out) }
-  const work = await startAction('ticket', workInput)
+  const work = await startAction(quick ? 'change' : 'ticket', workInput)
   setRunInput(work.id, workInput)
   setRunDecision(run.id, 'approved')
   return { project: project.id, worktree, run: work.id }

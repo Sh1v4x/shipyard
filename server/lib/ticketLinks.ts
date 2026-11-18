@@ -11,3 +11,16 @@ export function setTicketLink(path: string, ticketId: string | null) {
   else delete links[path]
   file.write(links)
 }
+
+/** Tickets associés à un worktree en plus de son ticket principal (faits dans la même branche et la même PR), par chemin. */
+const extras = jsonFile<Record<string, string[]>>('worktree-extra-tickets.json', {})
+
+export const extraTicketLinks = () => extras.read()
+
+export function setExtraTickets(path: string, ids: string[]) {
+  const all = { ...extras.read() }
+  const unique = [...new Set(ids)]
+  if (unique.length) all[path] = unique
+  else delete all[path]
+  extras.write(all)
+}

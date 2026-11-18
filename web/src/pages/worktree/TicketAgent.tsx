@@ -456,6 +456,7 @@ export function WorkResult({ project, run, result, planRunId, restartable = !!pl
 
   const shot = (file: string | null) => (file ? `/api/shots/${run.id}/${encodeURIComponent(file.split('/').pop()!)}` : null)
   const failed = result.checks.filter((c) => c.status === 'fail').length
+  const proofs = result.proofs ?? []
 
   return (
     <div className="flex flex-col gap-4 border-t border-dashed pt-4">
@@ -463,6 +464,29 @@ export function WorkResult({ project, run, result, planRunId, restartable = !!pl
         <SectionLabel>Résultat</SectionLabel>
         <p className="text-sm leading-relaxed">{result.summary}</p>
       </div>
+
+      {/* Preuves : la sortie réelle des tests ou des appels, cas par cas. Sans capture, c'est ce qui montre que ça marche. */}
+      {proofs.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <SectionLabel className="mb-0">Preuves · {plural(proofs.length, 'commande lancée', 'commandes lancées')}</SectionLabel>
+          {proofs.map((p, i) => (
+            <details key={i} open={i === 0} className="group overflow-hidden rounded-lg border">
+              <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-3 py-2 text-sm [&::-webkit-details-marker]:hidden">
+                <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+                <span className="font-medium">{p.title}</span>
+                <code className="min-w-0 font-mono text-xs break-all text-muted-foreground">{p.command}</code>
+              </summary>
+              <pre className="max-h-96 overflow-auto border-t bg-terminal px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre text-terminal-foreground">{p.output}</pre>
+            </details>
+          ))}
+        </div>
+      ) : result.screenshots.length === 0 && (
+        <Alert variant="warning">
+          <CircleHelpIcon />
+          <AlertTitle>Aucune preuve que ça fonctionne</AlertTitle>
+          <AlertDescription>Ni capture ni sortie de test dans ce compte rendu. Clique sur « Re-tester » pour obtenir la sortie des tests, cas par cas, avant d’approuver.</AlertDescription>
+        </Alert>
+      )}
 
       {result.screenshots.length > 0 ? (
         <div className="flex flex-col gap-3">

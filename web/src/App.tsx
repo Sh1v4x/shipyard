@@ -19,7 +19,8 @@ import { StatusBar } from './components/StatusBar.tsx'
 import { ChecklistMini } from './pages/worktree/checklist.tsx'
 import { AddProjectPage } from './pages/AddProject.tsx'
 import { OverviewPage } from './pages/Overview.tsx'
-import { AutomationsPage, CreateWorktreePage, DailyPage, InboxPage, StatsPage, InsightsPage, NewTicketPage, NotesPage, PrecheckPage, PromptsPage, QuickTicketsPage, SettingsPage, WorktreePage, loadWorktreePage } from './pages/lazy.ts'
+import { PageBoundary } from './components/PageBoundary.tsx'
+import { AutomationsPage, CreateWorktreePage, DailyPage, InboxPage, StatsPage, InsightsPage, NewTicketPage, NotesPage, PrecheckPage, QuickChangePage, PromptsPage, QuickTicketsPage, SettingsPage, WorktreePage, loadWorktreePage } from './pages/lazy.ts'
 import { go, href, useRoute, type Route } from './router.ts'
 import { ThemeToggle } from './theme.tsx'
 import { Notif, Spinner, plural, worktreeTitle, useToast } from './ui.tsx'
@@ -80,6 +81,7 @@ export function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar current={current} overview={overview.data} route={route} onMenu={() => setMobileNav(true)} />
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 pt-6 pb-16 sm:px-8">
+          <PageBoundary resetKey={JSON.stringify(route)}>
           <Suspense fallback={<div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />Chargement…</div>}>
           {route.page === 'overview' && current && <OverviewPage project={current} tab={route.tab} />}
           {route.page === 'worktree' && current && <WorktreePage key={route.wt} project={current} wtId={route.wt} tab={route.tab} />}
@@ -87,6 +89,7 @@ export function App() {
           {route.page === 'automations' && <AutomationsPage />}
           {route.page === 'insights' && current && <InsightsPage key={current.id} project={current} mode={route.mode} />}
           {route.page === 'new-ticket' && current && <NewTicketPage key={current.id} project={current} />}
+          {route.page === 'quick-change' && current && <QuickChangePage key={`${current.id}:${route.id ?? ''}`} project={current} id={route.id} />}
           {route.page === 'precheck' && current && <PrecheckPage key={`${current.id}:${route.ticket ?? ''}`} project={current} ticket={route.ticket} />}
           {route.page === 'quick' && current && <QuickTicketsPage key={current.id} project={current} />}
           {route.page === 'add-project' && <AddProjectPage />}
@@ -98,6 +101,7 @@ export function App() {
           {route.page === 'settings' && <SettingsPage section={route.section} />}
           {projects.data?.length === 0 && route.page !== 'add-project' && route.page !== 'prompts' && <AddProjectPage first />}
           </Suspense>
+          </PageBoundary>
         </main>
       </div>
       <StatusBar project={current} route={route} />
@@ -117,6 +121,7 @@ const PAGE_TITLES: Record<Route['page'], string> = {
   insights: 'Features & optimisations',
   'new-ticket': 'Nouveau ticket',
   precheck: 'Pre-check',
+  'quick-change': 'Modification rapide',
   quick: 'Tickets rapides',
   'add-project': 'Ajouter un projet',
   prompts: 'Prompts',
@@ -572,6 +577,7 @@ function Sidebar({ projects, current, todo, loading }: { projects: Project[]; cu
             <NavGroup {...groups.of('ticket')} icon={TicketIcon} label="Ticket">
               <SubLink to={href({ page: 'new-ticket', project: current.id })} active={route.page === 'new-ticket'}>Nouveau ticket</SubLink>
               <SubLink to={href({ page: 'precheck', project: current.id })} active={route.page === 'precheck'}>Pre-check</SubLink>
+              <SubLink to={href({ page: 'quick-change', project: current.id })} active={route.page === 'quick-change'}>Modification rapide</SubLink>
               <SubLink to={href({ page: 'quick', project: current.id })} active={route.page === 'quick'}>Tickets rapides</SubLink>
               <SubLink to={href({ page: 'insights', project: current.id })} active={route.page === 'insights'}>Features & optimisations</SubLink>
             </NavGroup>
@@ -632,7 +638,7 @@ type NavGroupKey = 'home' | 'ticket' | 'follow' | 'agents' | 'settings'
 /** Groupe du menu qui contient chaque page. */
 const GROUP_OF: Partial<Record<Route['page'], NavGroupKey>> = {
   overview: 'home',
-  'new-ticket': 'ticket', precheck: 'ticket', quick: 'ticket', insights: 'ticket',
+  'new-ticket': 'ticket', precheck: 'ticket', 'quick-change': 'ticket', quick: 'ticket', insights: 'ticket',
   notes: 'follow', daily: 'follow', stats: 'follow',
   automations: 'agents', prompts: 'agents',
   settings: 'settings',

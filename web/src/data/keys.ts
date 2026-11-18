@@ -35,6 +35,13 @@ export const qk = {
   worktreeStat: (project: string, wt: string) => ['worktree', project, wt, 'stat'] as const,
   /** Sous ['worktree', projet, wt] : relu avec le worktree après chaque action. */
   sdk: (project: string, wt: string) => ['worktree', project, wt, 'sdk'] as const,
+  /** Dossier Postman lié au worktree, ses requêtes et leurs réponses. Hors de ['worktree'] : ce cache-là est gardé dans le navigateur entre deux rechargements, et une réponse peut contenir un jeton. */
+  postman: (project: string, wt: string) => ['postman', 'worktree', project, wt] as const,
+  postmanWorkspaces: ['postman', 'workspaces'] as const,
+  postmanCollections: (workspace: string) => ['postman', 'collections', workspace] as const,
+  postmanEnvironments: (workspace: string) => ['postman', 'environments', workspace] as const,
+  postmanFolders: (collection: string) => ['postman', 'folders', collection] as const,
+  postmanApplied: (run: string | null) => ['postman-applied', run] as const,
   /** Sous ['worktree', projet, wt] : relu à la fin du run qui le prépare. */
   manualEnv: (project: string, wt: string) => ['worktree', project, wt, 'manual-env'] as const,
   /** Sous ['worktree', projet, wt] : relu avec le worktree après chaque action. */

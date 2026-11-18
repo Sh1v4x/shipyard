@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { BranchAskOutput, Run, InsightsMode, PrecheckOutput, QuickAssignee, QuickTicketsOutput, QuickUrgency, TicketDraftOutput, TicketPlanOutput, TicketWorkOutput } from '../../shared/types.ts'
+import type { BranchAskOutput, Run, InsightsMode, PrecheckOutput, QuickAssignee, QuickTicketsOutput, QuickUrgency, TicketAskOutput, TicketDraftOutput, TicketPlanOutput, TicketWorkOutput } from '../../shared/types.ts'
 import { DATA_DIR, HttpError, loadProjects } from '../lib/config.ts'
 import { getRun, listRuns, setRunDecision, startRun } from '../lib/claude.ts'
 import { run } from '../lib/exec.ts'
@@ -11,10 +11,11 @@ import * as schemas from '../schemas.ts'
 import { groupedProjects, linkedWorktrees } from '../services.ts'
 import { saveSnapshots, takeSnapshots } from '../lib/snapshots.ts'
 import { DIGESTS_DIR, buildDigest } from '../lib/digest.ts'
-import { type ProjectActions, type WorktreeAction, type WorktreeActions, branchContext, captureContext, linkedContext, specFrom, ticketCommentsText } from './context.ts'
+import { type ProjectActions, type WorktreeAction, type WorktreeActions, branchContext, captureContext, extraTicketsText, linkedContext, specFrom, ticketCommentsText } from './context.ts'
 import { createCheckout, releaseCheckout } from './checkouts.ts'
+import { postmanContext } from './postman.ts'
 import { shotsDirOf } from '../lib/runArtifacts.ts'
-import { ticketIdFrom } from '../../shared/text.ts'
+import { ticketIdFrom, ticketIdsFrom } from '../../shared/text.ts'
 
 /** Ce que demande chaque mode de « Features & optimisations ». */
 const INSIGHTS_MODE: Record<InsightsMode, string> = {
@@ -28,6 +29,12 @@ const INSIGHTS_MODE: Record<InsightsMode, string> = {
     'Each finding names the rule or the bug, the files, and the fix. Category: bug, sécurité, convention, architecture, dette, tests or performance. Impact: fort for a bug, a security hole or a hard rule broken.',
   ].join('\n'),
 }
+
+/** « ENG-1 + ENG-2 » : le ticket du worktree et ceux qui lui sont associés, pour le titre d'un run. */
+const ticketsLabel = (d: WorktreeAction['d']) => [d.ticket, ...(d.extraTickets ?? [])].filter((t) => !!t).map((t) => t.id).join(' + ')
+
+/** Dépôts liés, puis le dossier Postman lié au worktree : les prompts du ticket et des modifications libres ont tous `{linked}`. */
+const withPostman = async (linked: string, d: WorktreeAction['d']) => [linked, await postmanContext(d)].filter(Boolean).join('\n\n')
 
 /** Plan validé, mis en forme pour le prompt de travail. */
 function formatPlan(p: TicketPlanOutput): string {
@@ -64,14 +71,14 @@ async function planAction({ kind, input, d, scope, cwd, vars }: WorktreeAction):
     specFrom(kind, {
       ...vars,
       'ticket.comments': comments,
-      linked: linked.text,
+      linked: await withPostman(linked.text, d),
       capture,
       context: kind === 'change-plan' ? await branchContext(d) : '',
       consigne: request || (feedback && prevPlan ? 'the one from the previous plan below' : 'none'),
       previous: prevPlan && feedback ? `Previous plan:\n${formatPlan(prevPlan)}` : '',
       feedback: feedback ? `The user's message about this plan:\n${feedback}` : '',
     }, {
-      kind, title: feedback ? 'Échange sur le plan' : kind === 'change-plan' ? 'Plan de la modification' : `Plan ${d.ticket?.id ?? 'de la tâche'}`, scope, cwd, schema: schemas.ticketPlanSchema, note: feedback ?? null, request: request || null,
+      kind, title: feedback ? 'Échange sur le plan' : kind === 'change-plan' ? 'Plan de la modification' : `Plan ${ticketsLabel(d) || 'de la tâche'}`, scope, cwd, schema: schemas.ticketPlanSchema, note: feedback ?? null, request: request || null,
       addDirs: linked.dirs,
       // En révision, on reprend la session : l'agent a déjà exploré le code.
       resume: feedback ? prev?.sessionId : null,
@@ -148,7 +155,7 @@ async function workAction({ kind, input, project, d, scope, cwd, vars }: Worktre
     specFrom(key, {
       ...vars,
       'ticket.comments': comments,
-      linked: linked.text,
+      linked: await withPostman(linked.text, d),
       capture,
       context: kind === 'change' ? await branchContext(d) : '',
       consigne: input.extra?.trim() || planRun?.request?.trim() || 'none',
@@ -157,7 +164,7 @@ async function workAction({ kind, input, project, d, scope, cwd, vars }: Worktre
       'shots.dir': shotsDir,
       rules: rulesFor(project.id),
     }, {
-      id, kind, title: feedback ? 'Corrections' : kind === 'change' ? 'Modification libre' : d.ticket ? `Réaliser ${d.ticket.id}` : d.worktree.localTicket ? `Réaliser « ${d.worktree.localTicket.title.slice(0, 60)} »` : 'Tâche libre', scope: { ...scope, ref: planId ?? undefined }, cwd,
+      id, kind, title: feedback ? 'Corrections' : kind === 'change' ? 'Modification libre' : d.ticket ? `Réaliser ${ticketsLabel(d)}` : d.worktree.localTicket ? `Réaliser « ${d.worktree.localTicket.title.slice(0, 60)} »` : 'Tâche libre', scope: { ...scope, ref: planId ?? undefined }, cwd,
       schema: schemas.ticketWorkSchema, addDirs: [shotsDir, ...linked.dirs], resume: feedback ? previous?.sessionId : null,
       mcpServers: playwright,
     }),
@@ -185,7 +192,7 @@ async function askAction({ kind, input, project, d, scope, cwd, vars }: Worktree
       consigne: request,
       context: await branchContext(d),
       previous: prev && prevOut ? `## Previous exchange (the user follows up on it)\n\nRequest: ${prev.request ?? ''}\n\nAnswer: ${prevOut.summary}\n${prevOut.sections.map((x) => `### ${x.title}\n${x.body}`).join('\n')}` : '',
-      linked: linked.text,
+      linked: await withPostman(linked.text, d),
       rules: rulesFor(project.id),
     }, {
       kind, title: askKind === 'research' ? 'Recherche' : 'Question', scope: { ...scope, ref: askKind }, cwd, schema: schemas.branchAskSchema, request,
@@ -219,19 +226,75 @@ const QUICK_ASSIGNEE: Record<QuickAssignee, string> = {
 
 export const ticketsProjectActions: ProjectActions = {
   /**
+   * Question sur un ticket de « Tickets rapides » : l'agent a le ticket entier, ses commentaires et ce que la
+   * sélection en a dit, et répond d'après le code, sans rien modifier. Une précision reprend sa session.
+   */
+  'ticket-ask': async ({ kind, input, project }) => {
+    const { linearConfigured, ticketById, ticketComments } = await import('../lib/linear.ts')
+    if (!linearConfigured()) throw new HttpError(400, 'Linear n’est pas connecté (Réglages › Connexions)')
+    const request = input.extra?.trim()
+    if (!request) throw new HttpError(400, 'Écris ta question')
+    const id = ticketIdFrom(input.ticketId ?? '')
+    if (!id) throw new HttpError(400, 'Ticket manquant')
+    const t = await ticketById(id)
+    if (!t) throw new HttpError(404, `Ticket introuvable dans Linear : ${id}`)
+    const comments = await ticketComments(id).catch(() => [])
+    const date = (iso: string) => new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
+    // Ce que la dernière sélection a établi sur ce ticket : l'agent en part, sans le tenir pour acquis.
+    const last = listRuns({ project: project.id, kind: 'quick-tickets', status: 'success' }, 1)[0]
+    const pick = (last && (getRun(last.id)?.structured as QuickTicketsOutput | null))?.picks.find((p) => p.id === t.id)
+    const prev = input.previousRunId ? getRun(input.previousRunId) : null
+    const prevOut = prev?.structured as TicketAskOutput | null
+    const grouped = groupedProjects(project).filter((p) => existsSync(p.path))
+    return startRun(
+      specFrom('ticket-ask', {
+        'project.name': project.name,
+        repo: project.repo,
+        'ticket.id': t.id,
+        'ticket.title': t.title,
+        'ticket.url': t.url,
+        'ticket.meta': `Priority: ${t.priority} · Status: ${t.status} · Assignee: ${t.assignee ?? 'nobody'} · Labels: ${t.labels.join(', ') || 'none'}`,
+        'ticket.description': t.description.trim() || '(no description)',
+        'ticket.comments': comments.length
+          ? ['Ticket comments, oldest first. In case of contradiction, the most recent one wins over the description.', ...comments.map((c) => `- ${c.author}, ${date(c.createdAt)}:\n  ${c.body.replace(/\n/g, '\n  ')}`)].join('\n')
+          : '',
+        analysis: pick
+          ? [`Size ${pick.size}, ${pick.effort} (confidence: ${pick.confidence}), work in ${pick.repo}.`, `Why: ${pick.why}`, `Approach: ${pick.approach}`, pick.files.length ? `Files: ${pick.files.join(', ')}` : '', pick.risk ? `Risk: ${pick.risk}` : ''].filter(Boolean).join('\n')
+          : '(none: this ticket was not in the last selection)',
+        consigne: request,
+        previous: prev && prevOut ? `## Previous exchange (the user follows up on it)\n\nQuestion: ${prev.request ?? ''}\n\nAnswer: ${prevOut.summary}\n${prevOut.sections.map((x) => `### ${x.title}\n${x.body}`).join('\n')}` : '',
+        others: grouped.length ? grouped.map((p) => `  - ${p.name} (${p.repo}): ${p.path}`).join('\n') : '  (none)',
+      }, {
+        kind, title: `Question · ${t.id}`, scope: { project: project.id, ref: t.id }, cwd: project.path, schema: schemas.ticketAskSchema, request,
+        addDirs: grouped.map((p) => p.path),
+        // Suite d'un échange : l'agent reprend sa session, il a déjà lu le ticket et le code.
+        resume: prev?.sessionId ?? null,
+      }),
+    )
+  },
+  /**
    * Tickets rapides : tous les tickets à démarrer de l'équipe qui passent le filtre (label, priorité) sont donnés en
    * entier à l'agent dans un fichier ; il les vérifie dans le code et classe les moins longs à faire. Il en rend
    * toujours : je dois en prendre de toute façon, même quand aucun n'est petit.
    */
   'quick-tickets': async ({ kind, input, project }) => {
-    const { linearConfigured, todoTickets } = await import('../lib/linear.ts')
+    const { linearConfigured, todoTickets, ticketStatuses } = await import('../lib/linear.ts')
     if (!linearConfigured()) throw new HttpError(400, 'Linear n’est pas connecté (Réglages › Connexions)')
     if (!project.team) throw new HttpError(400, 'Aucune équipe Linear configurée pour ce projet')
     const label = input.label?.trim() || undefined
     const urgency = input.urgency ?? 'any'
     const assignee = input.assignee ?? 'free'
-    const { tickets, truncated } = await todoTickets(project.team, { label, urgency, assignee })
-    if (!tickets.length) throw new HttpError(409, 'Aucun ticket à démarrer ne correspond à ces critères')
+    const found = await todoTickets(project.team, { label, urgency, assignee })
+    if (!found.tickets.length) throw new HttpError(409, 'Aucun ticket à démarrer ne correspond à ces critères')
+    // Un ticket bloqué par un ticket pas terminé ne se démarre pas : il n'est pas proposé du tout.
+    const open = (t: (typeof found.tickets)[number]) => t.blockers.filter((b) => !b.done)
+    const blocked = found.tickets.filter((t) => open(t).length).map((t) => ({ id: t.id, title: t.title, url: t.url, priority: t.priority, by: open(t).map((b) => `${b.id} · ${b.title} (${b.status})`) }))
+    const tickets = found.tickets.filter((t) => !open(t).length)
+    const truncated = found.truncated
+    if (!tickets.length) throw new HttpError(409, `Les ${blocked.length} tickets qui correspondent sont tous bloqués par un ticket pas terminé`)
+    // Les dépendances sont souvent écrites dans la description, sans relation Linear : le statut de chaque ticket cité est donné à l'agent.
+    const cited = (t: (typeof tickets)[number]) => [...new Set(t.description.match(/\b[A-Z][A-Z0-9]+-\d+\b/g) ?? [])].filter((id) => id !== t.id)
+    const statuses = await ticketStatuses(project.team, tickets.flatMap(cited)).catch(() => new Map<string, { status: string; done: boolean }>())
     const byId = new Map(tickets.map((t) => [t.id, t]))
     const id = randomUUID()
     mkdirSync(QUICK_DIR, { recursive: true })
@@ -240,10 +303,13 @@ export const ticketsProjectActions: ProjectActions = {
       `## ${t.id} · ${t.title}`,
       `Link: ${t.url}`,
       `Priority: ${t.priority} · Status: ${t.status} · Assignee: ${t.assignee ?? 'nobody'} · Labels: ${t.labels.join(', ') || 'none'}`,
+      t.blockers.length ? `Blocked by (Linear relation), all finished: ${t.blockers.map((b) => `${b.id} (${b.status})`).join(', ')}` : '',
+      t.blocks.length ? `This ticket blocks (Linear relation), so it comes before them and does not wait for them: ${t.blocks.map((b) => b.id).join(', ')}` : '',
+      cited(t).some((id) => statuses.has(id)) ? `Tickets cited in the description, with their current status: ${cited(t).filter((id) => statuses.has(id)).map((id) => `${id} (${statuses.get(id)!.status}${statuses.get(id)!.done ? ', finished' : ', NOT finished'})`).join(', ')}` : '',
       '',
       // Description entière : l'estimation se joue souvent dans ses dernières lignes (questions, dépendances).
       t.description.trim() || '(no description)',
-    ].join('\n')).join('\n\n---\n\n'))
+    ].filter((l, i) => !(l === '' && i >= 3 && i <= 5)).join('\n')).join('\n\n---\n\n'))
     const grouped = groupedProjects(project).filter((p) => existsSync(p.path))
     return startRun(
       specFrom('quick-tickets', {
@@ -252,7 +318,7 @@ export const ticketsProjectActions: ProjectActions = {
         team: project.team,
         'tickets.path': listPath,
         'tickets.count': tickets.length,
-        'tickets.note': truncated ? `The list is cut at ${tickets.length} tickets (the most recently updated): more match the filter.` : '',
+        'tickets.note': [truncated ? `The list is cut at ${found.tickets.length} tickets (the most recently updated): more match the filter.` : '', blocked.length ? `${blocked.length} other ticket(s) matched the filter but are blocked in Linear by an unfinished ticket: they were removed from the list.` : ''].filter(Boolean).join(' '),
         'filter.label': label ?? 'any label',
         'filter.urgency': QUICK_URGENCY[urgency],
         'filter.assignee': QUICK_ASSIGNEE[assignee],
@@ -267,9 +333,18 @@ export const ticketsProjectActions: ProjectActions = {
           // Seuls les tickets de la liste comptent, avec leurs vraies données Linear (lien, priorité, labels).
           out.picks = out.picks.flatMap((p) => {
             const t = byId.get(p.id.trim().toUpperCase())
-            return t ? [{ ...p, id: t.id, title: t.title, url: t.url, priority: t.priority, labels: t.labels }] : []
+            return t ? [{ ...p, id: t.id, title: t.title, url: t.url, priority: t.priority, labels: t.labels, unblocks: t.blocks.filter((b) => !b.done).map((b) => `${b.id} (${b.status})`) }] : []
+          })
+          // Pas retenus : seulement des tickets de la liste, une fois chacun, et jamais un ticket retenu.
+          const picked = new Set(out.picks.map((p) => p.id))
+          out.skipped = (out.skipped ?? []).flatMap((x) => {
+            const t = byId.get(x.id.trim().toUpperCase())
+            if (!t || picked.has(t.id)) return []
+            picked.add(t.id)
+            return [{ ...x, id: t.id, title: t.title, url: t.url, priority: t.priority }]
           })
           out.examined = tickets.length
+          out.blocked = blocked
         },
       }),
     )
@@ -316,17 +391,27 @@ export const ticketsProjectActions: ProjectActions = {
   precheck: async ({ kind, input, project }) => {
     const { linearConfigured, ticketById, ticketComments } = await import('../lib/linear.ts')
     if (!linearConfigured()) throw new HttpError(400, 'Linear n’est pas connecté (Réglages › Connexions)')
-    const id = ticketIdFrom(input.ticketId ?? '')
-    if (!id) throw new HttpError(400, 'Donne l’URL du ticket Linear, ou son identifiant (ex. ENG-142)')
-    const t = await ticketById(id)
-    if (!t) throw new HttpError(404, `Ticket introuvable dans Linear : ${id}`)
     const prev = input.previousRunId ? getRun(input.previousRunId) : null
     const prevOut = prev?.structured as PrecheckOutput | null
     const feedback = input.feedback?.trim()
+    // Plusieurs tickets liés, faits ensemble : le premier est le principal (branche, lien du pre-check), les autres
+    // s'y associent. Un échange reprend ceux du pre-check précédent.
+    const [id, ...extraIds] = ticketIdsFrom([input.ticketId ?? '', ...(input.extraTickets ?? []), ...(feedback ? prev?.input?.extraTickets ?? [] : [])].join(' '))
+    if (!id) throw new HttpError(400, 'Donne l’URL du ticket Linear, ou son identifiant (ex. ENG-142)')
+    const [t, ...extras] = await Promise.all([id, ...extraIds].map(async (x) => {
+      const found = await ticketById(x)
+      if (!found) throw new HttpError(404, `Ticket introuvable dans Linear : ${x}`)
+      return found
+    }))
+    // Gardés avec les paramètres du run (enregistrés après le lancement) : l'approbation et une relance les retrouvent.
+    input.ticketId = id
+    input.extraTickets = extraIds
     // Lors d'un échange, la consigne d'origine vient du pre-check précédent (l'écran ne la garde pas).
     const request = input.extra?.trim() || (feedback ? prev?.request?.trim() : '') || ''
-    const comments = await ticketComments(id).catch(() => [])
+    const all = [t, ...extras]
+    const comments = (await Promise.all(all.map((x) => ticketComments(x.id).catch(() => [])))).flatMap((list, i) => list.map((c) => ({ ...c, ticket: all[i].id })))
     const date = (iso: string) => new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
+    const label = all.map((x) => x.id).join(' + ')
     const grouped = groupedProjects(project).filter((p) => existsSync(p.path))
     return startRun(
       specFrom('precheck', {
@@ -335,11 +420,11 @@ export const ticketsProjectActions: ProjectActions = {
         base: project.baseBranch,
         'ticket.id': t.id,
         'ticket.title': t.title,
-        'ticket.description': t.description || '(no description)',
+        'ticket.description': [t.description || '(no description)', extraTicketsText(extras)].filter(Boolean).join('\n\n'),
         'ticket.url': t.url,
         'ticket.type': t.type,
         'ticket.comments': comments.length
-          ? ['Ticket comments: clarifications added after the description. In case of contradiction, the most recent one wins over the description.', ...comments.map((c) => `- ${c.author}, ${date(c.createdAt)}:\n  ${c.body.slice(0, 3000).replace(/\n/g, '\n  ')}`)].join('\n')
+          ? ['Ticket comments: clarifications added after the description. In case of contradiction, the most recent one wins over the description.', ...comments.map((c) => `- ${all.length > 1 ? `[${c.ticket}] ` : ''}${c.author}, ${date(c.createdAt)}:\n  ${c.body.slice(0, 3000).replace(/\n/g, '\n  ')}`)].join('\n')
           : '',
         consigne: request || 'none',
         previous: prevOut && feedback ? `## Previous pre-check\n\nFeasibility: ${prevOut.feasibility.verdict}. ${prevOut.feasibility.details}\nEstimate: ${prevOut.estimate.size}, ${prevOut.estimate.effort} (confidence: ${prevOut.estimate.confidence}).\n\nPlan:\n${formatPlan(prevOut)}${prevOut.questions.length ? `\n\nQuestions you asked:\n${prevOut.questions.map((q) => `- ${q}`).join('\n')}` : ''}` : '',
@@ -353,9 +438,45 @@ export const ticketsProjectActions: ProjectActions = {
         repos: [project, ...grouped].map((p) => p.name).join(', '),
         rules: rulesFor(project.id),
       }, {
-        kind, title: feedback ? `Échange sur le pre-check · ${t.id}` : `Pre-check · ${t.id}`, scope: { project: project.id, ref: t.id }, cwd: project.path,
+        kind, title: feedback ? `Échange sur le pre-check · ${label}` : `Pre-check · ${label}`, scope: { project: project.id, ref: t.id }, cwd: project.path,
         schema: schemas.precheckSchema, addDirs: grouped.map((p) => p.path), note: feedback ?? null, request: request || null,
         // En échange, on reprend la session : l'agent a déjà exploré le code.
+        resume: feedback ? prev?.sessionId : null,
+      }),
+    )
+  },
+  /**
+   * Modification rapide, sans ticket : l'agent lit la demande et le code du projet (lecture seule) et rend un plan,
+   * au même format qu'un pre-check. Les échanges reprennent sa session ; l'approbation (approvePrecheck) crée la
+   * branche et le worktree, puis lance le travail sur ce plan comme une modification libre.
+   */
+  'quick-change': async ({ kind, input, project }) => {
+    const prev = input.previousRunId ? getRun(input.previousRunId) : null
+    const prevOut = prev?.structured as PrecheckOutput | null
+    const feedback = input.feedback?.trim()
+    const request = input.extra?.trim() || (feedback ? prev?.request?.trim() : '') || ''
+    if (!request) throw new HttpError(400, 'Décris la modification à faire')
+    if (!input.ref) throw new HttpError(400, 'Identifiant de la modification manquant')
+    const grouped = groupedProjects(project).filter((p) => existsSync(p.path))
+    return startRun(
+      specFrom('quick-change', {
+        'project.name': project.name,
+        repo: project.repo,
+        base: project.baseBranch,
+        consigne: request,
+        previous: prevOut && feedback ? `## Previous plan\n\nFeasibility: ${prevOut.feasibility.verdict}. ${prevOut.feasibility.details}\nEstimate: ${prevOut.estimate.size}, ${prevOut.estimate.effort}.\n\nPlan:\n${formatPlan(prevOut)}${prevOut.questions.length ? `\n\nQuestions you asked:\n${prevOut.questions.map((q) => `- ${q}`).join('\n')}` : ''}` : '',
+        feedback: feedback ? `## The user's message about this plan\n\n${feedback}` : '',
+        linked: grouped.length ? [
+          '## Linked repositories',
+          `${project.name} is grouped with other repositories: a change may span several of them. Explore them like the main repository, by absolute path:`,
+          grouped.map((p) => `- ${p.name} (${p.repo}): ${p.path}`).join('\n'),
+          'In the plan, each step says which repository it happens in, and files outside the current directory are given with their repository name as prefix. List in repos every repository the change touches: a worktree is created in each, on the same branch.',
+        ].join('\n\n') : '',
+        repos: [project, ...grouped].map((p) => p.name).join(', '),
+        rules: rulesFor(project.id),
+      }, {
+        kind, title: `${feedback ? 'Échange · ' : ''}Modif rapide · ${request.split('\n')[0].slice(0, 60)}`, scope: { project: project.id, ref: input.ref }, cwd: project.path,
+        schema: schemas.precheckSchema, addDirs: grouped.map((p) => p.path), note: feedback ?? null, request,
         resume: feedback ? prev?.sessionId : null,
       }),
     )

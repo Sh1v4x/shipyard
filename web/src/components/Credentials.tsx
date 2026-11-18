@@ -7,7 +7,7 @@ import { useClaudeAuth, useGithubBrowserLogin, useSaveCredentials } from '../dat
 import { useCredentials, useGithubBrowser } from '../data/queries.ts'
 import { Badge, Spinner, useToast } from '../ui.tsx'
 
-/** Réglages › Connexions : Claude Code, clé Linear et jeton GitHub (vérifiés avant d'être enregistrés dans .env.local). */
+/** Réglages › Connexions : Claude Code, clés Linear et Postman, jeton GitHub (vérifiés avant d'être enregistrés dans .env.local). */
 export function CredentialsSection() {
   // Connexion Claude en cours dans le Terminal : l'état est relu jusqu'à ce que le compte change.
   const [waiting, setWaiting] = useState<string | null>(null)
@@ -43,6 +43,14 @@ export function CredentialsSection() {
             removeLabel="Revenir à la connexion gh"
           />
           <GithubBrowserField />
+          <KeyField
+            title="Postman"
+            status={c.postman.configured ? <Badge tone={c.postman.user ? 'green' : 'red'}>{c.postman.user ? `Connecté · ${c.postman.user}` : 'Clé refusée par Postman'}</Badge> : <Badge tone="gray">Facultatif</Badge>}
+            current={c.postman.hint}
+            help="Active l’outil Postman des worktrees (catégorie « Outils ») : tu y lies un dossier d’une collection, et un agent y propose les requêtes des routes de la branche. Clé API : Postman › Settings › API keys."
+            placeholder="PMAK-…"
+            field="postmanKey"
+          />
         </>
       )}
     </>
@@ -55,7 +63,7 @@ function KeyField({ title, status, current, help, placeholder, field, removeLabe
   current: string | null
   help: string
   placeholder: string
-  field: 'linearKey' | 'githubToken'
+  field: 'linearKey' | 'githubToken' | 'postmanKey'
   removeLabel?: string
 }) {
   const save = useSaveCredentials()

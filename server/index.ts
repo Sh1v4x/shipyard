@@ -15,6 +15,7 @@ import { mockMiddleware } from './lib/mock.ts'
 import { localOnly } from './http.ts'
 import { removeRunArtifacts } from './lib/runArtifacts.ts'
 import { notesRoutes } from './routes/notes.ts'
+import { postmanRoutes } from './routes/postman.ts'
 import { projectsRoutes } from './routes/projects.ts'
 import { promptsRoutes } from './routes/prompts.ts'
 import { runsRoutes } from './routes/runs.ts'
@@ -38,7 +39,7 @@ app.use('*', localOnly)
 // Projet de démo (SHIPYARD_MOCK) : servi avant les vraies routes.
 app.use('/api/*', mockMiddleware)
 
-for (const routes of [systemRoutes, projectsRoutes, worktreesRoutes, runsRoutes, notesRoutes, settingsRoutes, promptsRoutes]) app.route('/api', routes)
+for (const routes of [systemRoutes, projectsRoutes, worktreesRoutes, runsRoutes, notesRoutes, settingsRoutes, promptsRoutes, postmanRoutes]) app.route('/api', routes)
 
 const DIST = join(ROOT, 'dist')
 

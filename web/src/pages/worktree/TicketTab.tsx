@@ -19,7 +19,9 @@ export function TicketTab({ project, detail, wtId }: TabProps) {
   const { worktree: w, ticket, pr } = detail
   // Ticket local (proposition gardée sur le Mac) : tient lieu de ticket tant qu'il n'y en a pas sur Linear.
   const local = !ticket ? w.localTicket : null
-  const ticketDone = ticket?.statusType === 'completed' || ticket?.statusType === 'canceled'
+  const extra = detail.extraTickets ?? []
+  // Avec des tickets associés, le worktree n'est fini que quand tous le sont.
+  const ticketDone = !!ticket && [ticket, ...extra].every((t) => t.statusType === 'completed' || t.statusType === 'canceled')
 
   return (
     <section className="flex flex-col gap-5" aria-label="Ticket">
@@ -44,6 +46,18 @@ export function TicketTab({ project, detail, wtId }: TabProps) {
         </article>
       )}
 
+      {extra.map((t) => (
+        <FoldCard key={t.id} icon={TicketIcon} title={t.title} summary={<><span className="font-mono text-xs">{t.id}</span> · {t.priority} · fait avec {ticket?.id ?? 'le ticket principal'}, dans la même PR</>} badge={<TicketStatus project={project} ticket={t} />}>
+          <div>
+            <SectionLabel>Description</SectionLabel>
+            <p className="text-sm leading-relaxed whitespace-pre-line">{t.description || <span className="text-muted-foreground">Pas de description.</span>}</p>
+          </div>
+          <Button variant="link" size="sm" className="h-auto self-start px-0" asChild>
+            <a href={t.url} target="_blank" rel="noreferrer">Ouvrir dans Linear<ArrowUpRightIcon /></a>
+          </Button>
+        </FoldCard>
+      ))}
+
       {ticket || local || w.kind === 'review' ? <TicketAgent {...{ project, detail, wtId }} /> : <TicketAgent {...{ project, detail, wtId }} mode="change" />}
 
       {/* Avec un ticket : une modification hors ticket reste possible, avec son propre plan. */}
@@ -65,7 +79,7 @@ function DoneNotice({ project, detail, wtId }: TabProps) {
       <div className="flex min-w-0 flex-1 gap-3">
         <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
         <div className="min-w-0">
-          <p className="font-medium text-emerald-800 dark:text-emerald-300">Ticket {detail.ticket?.status.toLowerCase()} dans Linear</p>
+          <p className="font-medium text-emerald-800 dark:text-emerald-300">{detail.extraTickets?.length ? 'Tickets terminés' : `Ticket ${detail.ticket?.status.toLowerCase()}`} dans Linear</p>
           <p className="mt-0.5 text-sm text-muted-foreground">
             {dirty ? `Il reste ${plural(dirty, 'fichier non commité', 'fichiers non commités')} : commite-les ou annule-les avant de supprimer le worktree.` : 'Ce worktree n’est plus utile. La branche est conservée.'}
           </p>

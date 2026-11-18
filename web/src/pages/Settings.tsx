@@ -81,7 +81,7 @@ export function SettingsPage({ section: target }: { section?: string }) {
         {...section('credentials')}
         icon={KeyRoundIcon}
         title="Connexions"
-        description={<>Claude Code fait tourner les agents sur ton abonnement. Les clés Linear et GitHub sont vérifiées, puis enregistrées dans <span className="font-mono text-xs">.env.local</span> sur ta machine (jamais commité). Elles s’appliquent tout de suite, sans redémarrer.</>}
+        description={<>Claude Code fait tourner les agents sur ton abonnement. Les clés Linear, GitHub et Postman sont vérifiées, puis enregistrées dans <span className="font-mono text-xs">.env.local</span> sur ta machine (jamais commité). Elles s’appliquent tout de suite, sans redémarrer.</>}
       >
         <CredentialsSection />
       </Section>

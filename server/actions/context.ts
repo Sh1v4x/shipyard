@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ActionInput, ActionKind, RunScope, ReviewThread, TicketPlanOutput, Project, Run, TicketWorkOutput, WorktreeDetail } from '../../shared/types.ts'
+import type { ActionInput, ActionKind, RunScope, ReviewThread, Ticket, TicketPlanOutput, Project, Run, TicketWorkOutput, WorktreeDetail } from '../../shared/types.ts'
 import { DATA_DIR, HttpError } from '../lib/config.ts'
 import { getRun, listRuns, type RunSpec } from '../lib/claude.ts'
 import * as git from '../lib/git.ts'
@@ -17,16 +17,31 @@ export const DIFFS_DIR = join(DATA_DIR, 'diffs')
 
 mkdirSync(DIFFS_DIR, { recursive: true })
 
+/**
+ * Tickets associés au ticket principal (faits dans la même branche et la même PR), pour un prompt : ils suivent sa
+ * description, avec le même poids. Vide quand il n'y en a pas.
+ */
+export function extraTicketsText(tickets: Ticket[], max = 5000): string {
+  if (!tickets.length) return ''
+  return [
+    '## Other tickets handled together with this one',
+    `This work also covers ${tickets.length > 1 ? 'the tickets' : 'the ticket'} below, tied to the one above: same branch, same PR, same weight. Treat them as one piece of work (one plan, one implementation, one test pass, one review), and say which ticket each part answers. In a PR description, write one \`Resolves <id>\` line per ticket.`,
+    ...tickets.map((t) => [`### ${t.id}: ${t.title}`, `Link: ${t.url}`, (t.description || '(no description)').slice(0, max)].join('\n')),
+  ].join('\n\n')
+}
+
 /** Variables communes à tous les prompts d'un worktree. */
 export function baseVars(d: WorktreeDetail): Record<string, string | number | null> {
   // Sans ticket Linear, le ticket local (proposition gardée sur le Mac) en tient lieu.
   const local = !d.ticket ? d.worktree.localTicket : null
+  const extra = extraTicketsText(d.extraTickets ?? [])
   return {
     'worktree.path': d.worktree.path,
     'worktree.branch': d.worktree.branch,
     'ticket.id': d.ticket?.id ?? (local ? 'local ticket (no Linear ticket)' : 'none'),
     'ticket.title': d.ticket?.title ?? local?.title ?? '',
-    'ticket.description': d.ticket?.description || (local ? localTicketMarkdown(local) : '(no description)'),
+    // Les tickets associés suivent la description : tout prompt qui la cite les reçoit, y compris mes versions modifiées.
+    'ticket.description': [d.ticket?.description || (local ? localTicketMarkdown(local) : '(no description)'), extra].filter(Boolean).join('\n\n'),
     'ticket.url': d.ticket?.url ?? (local ? 'none (local ticket)' : ''),
     'ticket.type': d.ticket?.type ?? (local ? localTicketType(local.category) : 'feat'),
     'pr.number': d.pr?.number ?? null,
@@ -167,7 +182,7 @@ function workHistory(d: WorktreeDetail): string {
 async function branchOrigin(d: WorktreeDetail): Promise<string> {
   const local = !d.ticket ? d.worktree.localTicket : null
   const ticket = d.ticket
-    ? [`Linear ticket ${d.ticket.id}: ${d.ticket.title}`, (d.ticket.description || '(no description)').slice(0, 5000), await ticketCommentsText(d)].filter(Boolean).join('\n\n')
+    ? [`Linear ticket ${d.ticket.id}: ${d.ticket.title}`, (d.ticket.description || '(no description)').slice(0, 5000), extraTicketsText(d.extraTickets ?? [], 3000), await ticketCommentsText(d)].filter(Boolean).join('\n\n')
     : local ? `Local ticket (no Linear ticket):\n${localTicketMarkdown(local).slice(0, 5000)}` : ''
   const history = workHistory(d)
   if (!ticket && !history) return ''
@@ -310,12 +325,14 @@ export async function ticketCommentsText(d: WorktreeDetail): Promise<string> {
   if (!d.ticket) return ''
   const { linearConfigured, ticketComments } = await import('../lib/linear.ts')
   if (!linearConfigured()) return ''
-  const comments = await ticketComments(d.ticket.id).catch(warnOn('linear.ticketComments', []))
-  if (!comments.length) return ''
+  // Le ticket principal et ses tickets associés : avec plusieurs tickets, chaque commentaire dit duquel il vient.
+  const tickets = [d.ticket, ...(d.extraTickets ?? [])]
+  const lists = await Promise.all(tickets.map((t) => ticketComments(t.id).catch(warnOn('linear.ticketComments', []))))
+  if (!lists.some((l) => l.length)) return ''
   const date = (iso: string) => new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
   return [
     'Ticket comments: clarifications added after the description, to take into account. In case of contradiction, the most recent one wins over the description.',
-    ...comments.map((c) => `- ${c.author}, ${date(c.createdAt)}:\n  ${c.body.slice(0, 3000).replace(/\n/g, '\n  ')}`),
+    ...lists.flatMap((comments, i) => comments.map((c) => `- ${tickets.length > 1 ? `[${tickets[i].id}] ` : ''}${c.author}, ${date(c.createdAt)}:\n  ${c.body.slice(0, 3000).replace(/\n/g, '\n  ')}`)),
   ].join('\n')
 }
 

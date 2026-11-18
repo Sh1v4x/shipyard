@@ -1,7 +1,7 @@
 import { awaitsReview, labelWithRole, needsChanges, needsReviewer, needsTesting, reviewersToRerequest } from './review.ts'
 import { since, waitingInfo } from './timeline.ts'
 import type { Ghost, InboxItem, LabelRules, ProjectOverview, PullRequest, QueueGroup, QueueItem, QueueTone, Ticket, Worktree } from './types.ts'
-import { plural } from './text.ts'
+import { coversTicket, plural, worktreeTicketIds } from './text.ts'
 
 // File d'attente d'un projet : une ligne par PR, branche ou ticket, avec ce qu'elle attend et où agir.
 // Calculée par le serveur avec la vue du projet ; le front y ajoute les résultats d'agents à valider (inboxToQueue).
@@ -85,20 +85,27 @@ export function buildQueue(ov: Omit<ProjectOverview, 'queue' | 'ghosts'>, rules:
         action: w ? { label: again ? 'Vérifier' : 'Reviewer', tab: again ? 'followup' : 'review' } : null,
       }
     }
+    // Mis en reviewer, mais la PR n'a pas encore le label « review demandée » de son dépôt : pas encore à moi, pas comptée.
+    if (me && pr.requestedReviewers.includes(me)) {
+      return { ...base, reasons: [{ label: 'Reviewer · pas encore prête à relire', tone: 'gray' }], detail: [pr.author, size(pr), 'attend son label de review'].filter(Boolean).join(' · ') }
+    }
     return { ...base, reasons: [{ label: 'Review rendue', tone: 'green' }], detail: [pr.author, wait && `${wait.label} · ${since(wait.since)}`].filter(Boolean).join(' · ') }
   }
 
   for (const w of ov.worktrees) {
     const t = ticketOf(w.ticketId)
-    const ticketDone = t?.statusType === 'completed' || t?.statusType === 'canceled'
+    // Avec des tickets associés, le worktree n'a fini son travail que quand tous sont terminés.
+    const ticketDone = !!t && [t, ...(w.extraTicketIds ?? []).map(ticketOf)].every((x) => x?.statusType === 'completed' || x?.statusType === 'canceled')
     if (w.merged) {
       seenPrs.add(w.merged.number)
       const review = w.kind === 'review'
       items.push({
         key: `wt:${w.id}`, group: 'clean', tone: 'gray', kind: review ? 'review' : 'mine', title: w.merged.title, ref: `#${w.merged.number}`, worktree: w.id, prNumber: w.merged.number, ticketId: w.ticketId,
         reasons: [{ label: w.merged.state === 'CLOSED' ? 'Fermée' : 'Mergée', tone: 'purple' }],
-        detail: review ? 'Review terminée : le worktree peut être supprimé' : `${w.ticketId ? `Passer ${w.ticketId} en Done, ` : ''}supprimer le worktree`,
-        action: { label: review ? 'Supprimer' : 'Aboutir' }, since: w.merged.mergedAt,
+        detail: review ? 'Review terminée : le worktree peut être supprimé'
+          : w.merged.state === 'CLOSED' ? 'PR fermée sans merge : le worktree peut être supprimé'
+          : `${w.ticketId ? `Passer ${worktreeTicketIds(w).join(' et ')} en Done, ` : ''}supprimer le worktree`,
+        action: { label: review || w.merged.state === 'CLOSED' ? 'Supprimer' : 'Aboutir' }, since: w.merged.mergedAt,
       })
       continue
     }
@@ -124,7 +131,7 @@ export function buildQueue(ov: Omit<ProjectOverview, 'queue' | 'ghosts'>, rules:
 
   // Tickets à moi pas encore démarrés, sans worktree.
   for (const t of ov.tickets) {
-    if (!t.isMine || t.statusType !== 'unstarted' || ov.worktrees.some((w) => w.ticketId === t.id)) continue
+    if (!t.isMine || t.statusType !== 'unstarted' || ov.worktrees.some((w) => coversTicket(w, t.id))) continue
     items.push(ticketItem(ov.project.id, t))
   }
 

@@ -1,4 +1,4 @@
-import { CheckIcon, GitCommitHorizontalIcon, PlayIcon, XIcon } from 'lucide-react'
+import { CheckIcon, GitCommitHorizontalIcon, PlayIcon, Undo2Icon, XIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,8 @@ export function CommitCard({ project, detail, wtId }: TabProps) {
   const plan = useAction<CommitPlanOutput>('commit-plan', scope)
   const exec = useAction<CommitExecOutput>('commit-exec', scope)
   const [drafts, setDrafts] = useState<Draft[] | null>(null)
+  // Fichiers écartés dont j'annule les modifications ; par défaut ils restent tous en local.
+  const [discards, setDiscards] = useState<string[]>([])
   const dirty = detail.dirtyFiles
   // Worktrees associés avec des changements : commités avec ceux-ci, chacun dans son dépôt.
   const linked = (detail.linked ?? []).filter((l) => l.dirtyFiles.length)
@@ -40,11 +42,24 @@ export function CommitCard({ project, detail, wtId }: TabProps) {
   const planIsFresh = plan.run && (!exec.run || Date.parse(plan.run.startedAt) > Date.parse(exec.run.startedAt))
   useEffect(() => {
     setDrafts(plan.result && planIsFresh ? plan.result.commits.map((c) => ({ ...c, approved: true })) : null)
+    setDiscards([])
   }, [plan.result, planIsFresh])
 
   if (!total && !exec.id) return null
   const approved = drafts?.filter((d) => d.approved && d.title.trim() && d.files.length) ?? []
   const report = exec.result
+  // Fichiers modifiés qu'aucun commit approuvé n'emporte : ils resteront en local, alors que le code poussé peut en dépendre
+  // (une migration sans son schéma, un type sans son usage…). Ceux que le plan écarte exprès sont listés à part.
+  const taken = new Set(approved.flatMap((d) => d.files.map((f) => `${d.project ?? project.id}:${f}`)))
+  const excluded = new Set((plan.result?.excluded ?? []).map((x) => x.file))
+  // Fichiers que le plan écarte et qui sont encore modifiés : je choisis pour chacun de le garder ou d'annuler ses modifications.
+  // Un dossier entièrement non suivi est une seule entrée de git (`coverage/`) : un fichier écarté peut être dedans.
+  const dirtyPaths = [...dirty.map((f) => f.path), ...linked.flatMap((l) => l.dirtyFiles.map((f) => f.path))]
+  const excludedFiles = (plan.result?.excluded ?? []).filter((x) => dirtyPaths.some((p) => p === x.file || (p.endsWith('/') && x.file.startsWith(p))))
+  const leftOut = drafts
+    ? [...dirty.map((f) => ({ project: project.id, path: f.path })), ...linked.flatMap((l) => l.dirtyFiles.map((f) => ({ project: l.project, path: f.path })))]
+        .filter((f) => !taken.has(`${f.project}:${f.path}`) && !excluded.has(f.path) && !(f.path.endsWith('/') && [...excluded].some((x) => x.startsWith(f.path))))
+    : []
 
   return (
     <FoldCard
@@ -83,14 +98,50 @@ export function CommitCard({ project, detail, wtId }: TabProps) {
               </div>
             </div>
           ))}
-          {(plan.result?.excluded.length ?? 0) > 0 && (
-            <div className="text-sm text-muted-foreground">
-              Exclus du commit : {plan.result!.excluded.map((x) => `${x.file} (${x.reason})`).join(', ')}
+          {leftOut.length > 0 && (
+            <Alert variant="warning">
+              <AlertDescription>
+                <span className="font-medium">{plural(leftOut.length, 'fichier modifié ne part dans aucun commit', 'fichiers modifiés ne partent dans aucun commit')}</span> et {leftOut.length > 1 ? 'resteront' : 'restera'} en local. Si le code poussé en dépend, la CI cassera : approuve le commit qui {leftOut.length > 1 ? 'les' : 'le'} contient, ou propose à nouveau.
+                <span className="mt-1 block font-mono text-xs break-all">{leftOut.map((f) => (f.project !== project.id ? `${nameOf(f.project) ?? f.project} · ${f.path}` : f.path)).join(', ')}</span>
+              </AlertDescription>
+            </Alert>
+          )}
+          {excludedFiles.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-lg border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{plural(excludedFiles.length, 'fichier écarté des commits', 'fichiers écartés des commits')}</p>
+                  <p className="text-xs text-muted-foreground">Pour chacun : le garder modifié en local, ou annuler ses modifications. Rien n’est annulé avant que tu approuves, en bas.</p>
+                </div>
+                <span className="flex gap-1">
+                  <Button size="sm" variant="ghost" disabled={!discards.length} onClick={() => setDiscards([])}>Tout garder</Button>
+                  <Button size="sm" variant="ghost" disabled={discards.length === excludedFiles.length} onClick={() => setDiscards(excludedFiles.map((x) => x.file))}>Tout annuler</Button>
+                </span>
+              </div>
+              {excludedFiles.map((x) => {
+                const drop = discards.includes(x.file)
+                return (
+                  <div key={x.file} className={cn('flex flex-wrap items-center gap-3 border-t pt-2', drop && 'text-muted-foreground')}>
+                    <div className="min-w-0 flex-[1_1_240px]">
+                      <span className={cn('font-mono text-xs break-all', drop && 'line-through')}>{x.file}</span>
+                      <p className="text-xs text-muted-foreground">{x.reason}</p>
+                    </div>
+                    <span className="flex gap-1.5">
+                      <Button size="sm" variant={drop ? 'outline' : 'default'} aria-pressed={!drop} onClick={() => setDiscards(discards.filter((f) => f !== x.file))}>Garder en local</Button>
+                      <Button size="sm" variant="outline" className={cn(drop && 'border-red-500/40 text-destructive hover:text-destructive')} aria-pressed={drop} onClick={() => setDiscards([...discards.filter((f) => f !== x.file), x.file])}><Undo2Icon />Annuler ses modifications</Button>
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" disabled={!approved.length || exec.busy} onClick={() => exec.start({ commits: approved.map(({ title, files, project: p }) => ({ title, files, project: p })) })}>
-              {exec.starting && <Spinner />}Commiter et pousser {plural(approved.length, 'commit', 'commits')}
+            <Button size="sm" disabled={(!approved.length && !discards.length) || exec.busy} onClick={() => exec.start({ commits: approved.map(({ title, files, project: p }) => ({ title, files, project: p })), discard: discards })}>
+              {exec.starting && <Spinner />}
+              {approved.length ? `Commiter et pousser ${plural(approved.length, 'commit', 'commits')}` : ''}
+              {approved.length > 0 && discards.length > 0 ? ' · ' : ''}
+              {discards.length ? `${approved.length ? 'annuler' : 'Annuler'} ${plural(discards.length, 'fichier écarté', 'fichiers écartés')}` : ''}
+              {!approved.length && !discards.length ? 'Commiter et pousser' : ''}
             </Button>
             <Button size="sm" variant="outline" disabled={plan.busy} onClick={() => plan.start()}>Proposer à nouveau</Button>
             <span className="text-sm text-muted-foreground">Chaque commit est poussé juste après sa création.</span>
@@ -103,6 +154,7 @@ export function CommitCard({ project, detail, wtId }: TabProps) {
       {report && (
         <div className="flex flex-col gap-2">
           <SectionLabel>Rapport · {plural(report.pushed, 'commit poussé', 'commits poussés')}{report.failed ? ` · ${plural(report.failed, 'échec', 'échecs')}` : ''}</SectionLabel>
+          {(report.discarded?.length ?? 0) > 0 && <p className="text-sm text-muted-foreground">Modifications annulées : <span className="font-mono text-xs break-all">{report.discarded!.join(', ')}</span></p>}
           {report.results.map((r, i) => (
             <div key={i} className="rounded-lg border p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">

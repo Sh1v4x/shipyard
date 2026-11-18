@@ -338,8 +338,31 @@ export const quickTicketsSchema = {
         required: ['id', 'title', 'url', 'priority', 'labels', 'repo', 'size', 'effort', 'confidence', 'why', 'approach', 'files', 'risk'],
       },
     },
+    skipped: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: s('Ticket identifier, exactly as in the list'),
+          kind: { type: 'string', enum: ['blocked', 'long', 'unclear'] },
+          reason: s('One or two sentences: what it waits for, or why it is longer than the selected ones'),
+          waitsFor: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['id', 'kind', 'reason', 'waitsFor'],
+      },
+    },
   },
-  required: ['summary', 'examined', 'picks'],
+  required: ['summary', 'examined', 'picks', 'skipped'],
+} as const
+
+export const ticketAskSchema = {
+  type: 'object',
+  properties: {
+    summary: s('The answer in short, 1 to 3 sentences'),
+    sections: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, body: s('Markdown: lists, code, file paths') }, required: ['title', 'body'] } },
+    files: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['summary', 'sections', 'files'],
 } as const
 
 export const followupSchema = {
@@ -635,6 +658,35 @@ export const branchAskSchema = {
   required: ['summary', 'sections', 'files', 'followUps'],
 } as const
 
+export const postmanSchema = {
+  type: 'object',
+  properties: {
+    summary: s('What is proposed, or the answer to the question, 1 to 3 sentences'),
+    details: s('Markdown: assumptions, what could not be established, detailed answer. Empty string when there is nothing to add'),
+    operations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          op: { type: 'string', enum: ['create', 'update', 'delete'] },
+          requestId: { type: ['string', 'null'], description: 'Id of the existing request for update and delete, null for create' },
+          folder: s('Subfolder relative to the linked folder, segments separated by " / "; empty string for the linked folder itself'),
+          name: { type: 'string' },
+          method: s('HTTP method in upper case'),
+          url: s('Full URL with its {{variables}} and query parameters'),
+          headers: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, value: { type: 'string' } }, required: ['key', 'value'] } },
+          body: { type: ['string', 'null'], description: 'Raw body. On update: null keeps the current body, empty string removes it' },
+          description: s('Markdown description of the request'),
+          reason: s('Where the change comes from: the route in the code, what changed'),
+        },
+        required: ['op', 'requestId', 'folder', 'name', 'method', 'url', 'headers', 'body', 'description', 'reason'],
+      },
+    },
+    files: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['summary', 'details', 'operations', 'files'],
+} as const
+
 export const ticketWorkSchema = {
   type: 'object',
   properties: {
@@ -652,11 +704,23 @@ export const ticketWorkSchema = {
         required: ['name', 'platform', 'description', 'before', 'after'],
       },
     },
+    proofs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          title: s('What this proves, in a few words'),
+          command: s('The command actually run, as typed'),
+          output: s('Its real output, copied as is (the useful lines, 60 at most): each case with its expected and obtained values'),
+        },
+        required: ['title', 'command', 'output'],
+      },
+    },
     appNote: { type: 'string' },
     risks: { type: 'array', items: { type: 'string' } },
     followUps: { type: 'array', items: { type: 'string' } },
   },
-  required: ['summary', 'changes', 'checks', 'screenshots', 'appNote', 'risks', 'followUps'],
+  required: ['summary', 'changes', 'checks', 'proofs', 'screenshots', 'appNote', 'risks', 'followUps'],
 } as const
 
 export const testCheckSchema = {

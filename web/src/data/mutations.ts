@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type {
-  BranchDeleteResult, BranchInfo, ClaudeUsage, InsightItem, Run, Credentials, InboxItem, Note, Settings, CreatedTicket, NewIssue, PendingReview, PrFiles, Project, ProjectOverview, ReviewDecisions, ReviewDraftComment, ReviewEvent,
+  BranchDeleteResult, BranchInfo, ClaudeUsage, InsightItem, Run, Credentials, InboxItem, Note, Settings, CreatedTicket, NewIssue, PendingReview, PostmanApplied, PostmanLink, PostmanRequestData, PostmanResponse, PostmanState, PrFiles, Project, ProjectOverview, ReviewDecisions, ReviewDraftComment, ReviewEvent,
   TicketState, WorktreeDetail,
   StatsReport, StatsScope,
 } from '../../../shared/types.ts'
@@ -122,7 +122,7 @@ export function useUnlinkWorktree(project: string, wt: string) {
 export function useCreateWorktree(project: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { mode: string; branch?: string; base?: string; ticketId?: string; prNumber?: number }) =>
+    mutationFn: (body: { mode: string; branch?: string; base?: string; ticketId?: string; extraTickets?: string[]; prNumber?: number }) =>
       api<{ id: string; path: string }>(`/projects/${project}/worktrees`, { body }),
     onSuccess: () => syncProject(qc, project),
   })
@@ -190,7 +190,7 @@ export function useRemoveWorktree(project: string) {
 export function useFinishWorktree(project: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (wt: string) => api<{ ticket: { id: string; state: string } | null }>(`${wtPath(project, wt)}/finish`, { method: 'POST' }),
+    mutationFn: (wt: string) => api<{ ticket: { id: string; state: string } | null; tickets: { id: string; state: string }[] }>(`${wtPath(project, wt)}/finish`, { method: 'POST' }),
     onSuccess: async (_, wt) => {
       qc.removeQueries({ queryKey: qk.worktree(project, wt) })
       await syncProject(qc, project)
@@ -254,7 +254,10 @@ export function useSetTicketState(project: string) {
       const patch = <T extends { id: string; status: string; statusType: string }>(t: T): T =>
         t.id === ticket ? { ...t, status: state.name, statusType: state.type === 'duplicate' ? 'canceled' : state.type } : t
       qc.setQueryData<ProjectOverview>(qk.overview(project), (ov) => ov && { ...ov, tickets: ov.tickets.map(patch) })
-      qc.setQueriesData<WorktreeDetail>({ queryKey: qk.worktree(project) }, (d) => d && (d.ticket?.id === ticket ? { ...d, ticket: patch(d.ticket) } : d))
+      // Sous ['worktree', projet] vivent aussi des listes (SDK, branche de review…) : seul le détail d'un worktree
+      // (clé à trois éléments) porte des tickets. Recopier une liste avec { ...d } en ferait un objet.
+      qc.setQueriesData<WorktreeDetail>({ queryKey: qk.worktree(project), predicate: (q) => q.queryKey.length === 3 }, (d) =>
+        d && [d.ticket, ...(d.extraTickets ?? [])].some((t) => t?.id === ticket) ? { ...d, ticket: d.ticket && patch(d.ticket), extraTickets: d.extraTickets?.map(patch) } : d)
       return { prevOverview }
     },
     onError: (_e, _v, ctx) => {
@@ -320,6 +323,30 @@ export function useLinkTicket(project: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ wt, ticketId }: { wt: string; ticketId: string | null }) => api(`${wtPath(project, wt)}/ticket`, { method: 'PUT', body: { ticketId } }),
+    onSuccess: (_, { wt }) => Promise.all([
+      qc.invalidateQueries({ queryKey: qk.overview(project) }),
+      qc.invalidateQueries({ queryKey: qk.worktree(project, wt) }),
+    ]),
+  })
+}
+
+/** Ajoute un ticket à un worktree : principal s'il n'en a pas, sinon associé (fait dans la même branche et la même PR). */
+export function useAddTicket(project: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ wt, ticketId }: { wt: string; ticketId: string }) => api<{ ticketId: string; extra: boolean }>(`${wtPath(project, wt)}/tickets`, { body: { ticketId } }),
+    onSuccess: (_, { wt }) => Promise.all([
+      qc.invalidateQueries({ queryKey: qk.overview(project) }),
+      qc.invalidateQueries({ queryKey: qk.worktree(project, wt) }),
+    ]),
+  })
+}
+
+/** Retire un ticket associé du worktree (son statut Linear ne change pas). */
+export function useRemoveExtraTicket(project: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ wt, ticketId }: { wt: string; ticketId: string }) => api(`${wtPath(project, wt)}/tickets/${ticketId}`, { method: 'DELETE' }),
     onSuccess: (_, { wt }) => Promise.all([
       qc.invalidateQueries({ queryKey: qk.overview(project) }),
       qc.invalidateQueries({ queryKey: qk.worktree(project, wt) }),
@@ -593,10 +620,98 @@ export function useTestNotification() {
 export function useSaveCredentials() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { linearKey?: string | null; githubToken?: string | null }) => api<Credentials>('/settings/credentials', { method: 'PUT', body }),
+    mutationFn: (body: { linearKey?: string | null; githubToken?: string | null; postmanKey?: string | null }) => api<Credentials>('/settings/credentials', { method: 'PUT', body }),
     onSuccess: async (c) => {
       qc.setQueryData(qk.credentials, c)
       await qc.invalidateQueries()
+    },
+  })
+}
+
+// ---------- Postman ----------
+
+/** Lie un dossier Postman au worktree (folderId null : la racine de la collection). */
+export function useLinkPostman(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { workspaceId: string | null; collectionId: string; folderId: string | null }) => api<PostmanLink>(`${wtPath(project, wt)}/postman`, { method: 'PUT', body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.postman(project, wt) }),
+  })
+}
+
+export function useUnlinkPostman(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api(`${wtPath(project, wt)}/postman`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.postman(project, wt) }),
+  })
+}
+
+/** Environnement Postman dont les variables servent à envoyer les requêtes (null : aucun). */
+export function useSetPostmanEnvironment(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (environmentId: string | null) => api(`${wtPath(project, wt)}/postman/environment`, { method: 'PUT', body: { environmentId } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.postman(project, wt) }),
+  })
+}
+
+/** Valeur d'une variable gardée dans Shipyard (null : retirée) : elle passe avant celle de Postman à l'envoi. */
+export function useSetPostmanVariable(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { key: string; value: string | null }) => api(`${wtPath(project, wt)}/postman/variables`, { method: 'PUT', body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.postman(project, wt) }),
+  })
+}
+
+/** Envoie une requête du dossier, ou un brouillon : la réponse d'une requête enregistrée rejoint l'état de l'onglet. */
+export function useRunPostman(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { requestId?: string; request?: PostmanRequestData }) => api<PostmanResponse>(`${wtPath(project, wt)}/postman/run`, { body }),
+    onSuccess: (res) => {
+      if (!res.requestId) return
+      qc.setQueryData<PostmanState>(qk.postman(project, wt), (s) => s && { ...s, responses: [...s.responses.filter((r) => r.requestId !== res.requestId), res] })
+    },
+  })
+}
+
+/** Crée (sans id) ou modifie une requête du dossier lié, écrite à la main. */
+export function useSavePostmanRequest(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }: PostmanRequestData & { id: string | null; folder: string }) =>
+      api<{ id: string | null }>(`${wtPath(project, wt)}/postman/requests${id ? `/${id}` : ''}`, { method: id ? 'PUT' : 'POST', body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.postman(project, wt) }),
+  })
+}
+
+export function useDeletePostmanRequest(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api(`${wtPath(project, wt)}/postman/requests/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.postman(project, wt) }),
+  })
+}
+
+/** Relit le dossier lié dans Postman, sans attendre la fin du cache du serveur. */
+export function useRefreshPostman(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<PostmanState>(`${wtPath(project, wt)}/postman?refresh=1`),
+    onSuccess: (state) => qc.setQueryData(qk.postman(project, wt), state),
+  })
+}
+
+/** Écrit dans Postman les propositions approuvées d'un run : le dossier est relu, même après un échec en cours de lot. */
+export function useApplyPostman(project: string, wt: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { runId: string; indexes: number[] }) => api<{ applied: PostmanApplied[]; error: string | null }>(`${wtPath(project, wt)}/postman/apply`, { body }),
+    onSuccess: (r, { runId }) => {
+      qc.setQueryData(qk.postmanApplied(runId), r.applied)
+      return qc.invalidateQueries({ queryKey: qk.postman(project, wt) })
     },
   })
 }

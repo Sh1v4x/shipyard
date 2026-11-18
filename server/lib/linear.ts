@@ -91,7 +91,28 @@ const TODO_LIMIT = 300
  * Tickets de l'équipe qui restent à démarrer (triage, backlog, à faire), filtrés par label et par priorité.
  * `free` : ceux sans personne ou à moi ; `all` : ceux de toute l'équipe. Jamais mis en cache : la sélection part de l'état du moment.
  */
-export async function todoTickets(teamKey: string, opts: { label?: string; urgency: QuickUrgency; assignee: QuickAssignee }): Promise<{ tickets: Ticket[]; truncated: boolean }> {
+/** Ticket qui en bloque un autre (relation « blocks » de Linear), avec son statut. */
+export interface Blocker { id: string; title: string; status: string; done: boolean }
+/** `blocks` : les tickets que celui-ci bloque (il passe avant eux). */
+export type TodoTicket = Ticket & { blockers: Blocker[]; blocks: Blocker[] }
+
+const isDone = (type: string) => type === 'completed' || type === 'canceled'
+
+/** Statut des tickets de l'équipe cités par leur identifiant (ex. dans une description) : `TCL-12 → En cours`. */
+export async function ticketStatuses(teamKey: string, ids: string[]): Promise<Map<string, { status: string; done: boolean }>> {
+  const numbers = [...new Set(ids.map((id) => id.match(new RegExp(`^${teamKey}-(\\d+)$`, 'i'))?.[1]).filter((n): n is string => !!n).map(Number))]
+  const out = new Map<string, { status: string; done: boolean }>()
+  for (let i = 0; i < numbers.length; i += 100) {
+    const data = await query<{ issues: { nodes: { identifier: string; state: { name: string; type: string } }[] } }>(
+      `query($filter:IssueFilter!){issues(first:100,filter:$filter){nodes{identifier state{name type}}}}`,
+      { filter: { team: { key: { eq: teamKey } }, number: { in: numbers.slice(i, i + 100) } } },
+    )
+    for (const n of data.issues.nodes) out.set(n.identifier, { status: n.state.name, done: isDone(n.state.type) })
+  }
+  return out
+}
+
+export async function todoTickets(teamKey: string, opts: { label?: string; urgency: QuickUrgency; assignee: QuickAssignee }): Promise<{ tickets: TodoTicket[]; truncated: boolean }> {
   const me = await getViewerId()
   const filter: Record<string, unknown> = {
     team: { key: { eq: teamKey } },
@@ -101,15 +122,23 @@ export async function todoTickets(teamKey: string, opts: { label?: string; urgen
     ...(opts.urgency === 'urgent' ? { priority: { eq: 1 } } : opts.urgency === 'high' ? { priority: { in: [1, 2] } } : {}),
     ...(opts.assignee === 'free' ? { or: [{ assignee: { null: true } }, { assignee: { id: { eq: me } } }] } : {}),
   }
-  const tickets: Ticket[] = []
+  type Rel = { identifier: string; title: string; state: { name: string; type: string } }
+  type Node = IssueNode & { inverseRelations: { nodes: { type: string; issue: Rel }[] }; relations: { nodes: { type: string; relatedIssue: Rel }[] } }
+  const toBlocker = (r: Rel): Blocker => ({ id: r.identifier, title: r.title, status: r.state.name, done: isDone(r.state.type) })
+  const tickets: TodoTicket[] = []
   let after: string | null = null
   let more = false
   do {
-    const data: { issues: { nodes: IssueNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await query(
-      `query($filter:IssueFilter!,$after:String){issues(first:100,after:$after,orderBy:updatedAt,filter:$filter){nodes{${ISSUE_FIELDS}} pageInfo{hasNextPage endCursor}}}`,
+    const data: { issues: { nodes: Node[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await query(
+      // inverseRelations de type « blocks » : les tickets qui bloquent celui-ci.
+      `query($filter:IssueFilter!,$after:String){issues(first:50,after:$after,orderBy:updatedAt,filter:$filter){nodes{${ISSUE_FIELDS} inverseRelations(first:20){nodes{type issue{identifier title state{name type}}}} relations(first:20){nodes{type relatedIssue{identifier title state{name type}}}}} pageInfo{hasNextPage endCursor}}}`,
       { filter, after },
     )
-    tickets.push(...data.issues.nodes.map((i) => toTicket(i, me)))
+    tickets.push(...data.issues.nodes.map((i) => ({
+      ...toTicket(i, me),
+      blockers: i.inverseRelations.nodes.filter((r) => r.type === 'blocks').map((r) => toBlocker(r.issue)),
+      blocks: i.relations.nodes.filter((r) => r.type === 'blocks').map((r) => toBlocker(r.relatedIssue)),
+    })))
     more = data.issues.pageInfo.hasNextPage
     after = data.issues.pageInfo.endCursor
   } while (more && after && tickets.length < TODO_LIMIT)

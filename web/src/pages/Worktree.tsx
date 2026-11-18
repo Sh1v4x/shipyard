@@ -1,4 +1,4 @@
-import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, ClockIcon, CodeIcon, CopyIcon, EllipsisIcon, GhostIcon, GitMergeIcon, PencilLineIcon, PinIcon, PinOffIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react'
+import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, ClockIcon, CodeIcon, CopyIcon, EllipsisIcon, GhostIcon, GitMergeIcon, GitPullRequestClosedIcon, PencilLineIcon, PinIcon, PinOffIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { useState } from 'react'
 import { LinkTicket } from '../components/LinkTicket.tsx'
 import { LabelPicker } from '../components/LabelPicker.tsx'
@@ -6,14 +6,15 @@ import { LinkedWorktrees } from '../components/LinkedWorktrees.tsx'
 import { MoveWorktree } from '../components/MoveWorktree.tsx'
 import { TicketStatus } from '../components/TicketStatus.tsx'
 import { PrTimeline } from '../components/PrTimeline.tsx'
-import type { Project, PullRequest, Worktree } from '../../../shared/types.ts'
-import { useFinishWorktree, useMarkPrDraft, useMarkPrReady, useOpenInEditor, useRemoveWorktree, useRerequestReview, useSetGhost, useWakeGhost } from '../data/mutations.ts'
+import type { Project, PullRequest, Ticket, Worktree } from '../../../shared/types.ts'
+import { useFinishWorktree, useMarkPrDraft, useMarkPrReady, useOpenInEditor, useRemoveExtraTicket, useRemoveWorktree, useRerequestReview, useSetGhost, useWakeGhost } from '../data/mutations.ts'
 import { usePins } from '../data/pins.ts'
 import { useChecks, useHealth, useLabelRules, useProjectOverview, useReviewerCandidates, useSdkStatus, useThreads, useWorktreeDetail } from '../data/queries.ts'
 import { awaitsReview, labelWithRole, needsChanges, needsReviewer, needsTesting } from '../../../shared/review.ts'
 import { isStale, since, waitingInfo } from '../../../shared/timeline.ts'
 import { go } from '../router.ts'
 import { ghostKey } from '../../../shared/queue.ts'
+import { worktreeTicketIds } from '../../../shared/text.ts'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
@@ -21,12 +22,13 @@ import { Avatar, Badge, ErrorBox, Label, Spinner, plural, prReviewBadge, reviewe
 import { CiTab } from './worktree/CiTab.tsx'
 import { ChecksTab } from './worktree/ChecksTab.tsx'
 import { LogsTab } from './worktree/LogsTab.tsx'
+import { PostmanTab } from './worktree/PostmanTab.tsx'
 import { CommentsTab } from './worktree/CommentsTab.tsx'
 import { ConflictsTab } from './worktree/ConflictsTab.tsx'
 import { FilesTab } from './worktree/FilesTab.tsx'
 import { ReviewSyncTab } from './worktree/ReviewSyncTab.tsx'
 import { FollowupTab } from './worktree/FollowupTab.tsx'
-import { type PrState, type Section, StateDot, buildSections, lateSdks, myOpenThreads, testsDone } from './worktree/checklist.tsx'
+import { type PrState, type Section, StateDot, buildSections, lateSdks, myOpenThreads, reviewToDo, testsDone } from './worktree/checklist.tsx'
 import { ReviewTab } from './worktree/ReviewTab.tsx'
 import { SdkPanel } from './worktree/SdkPanel.tsx'
 import { TestsTab } from './worktree/TestsTab.tsx'
@@ -50,7 +52,8 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
   const toast = useToast()
   const rules = useLabelRules()
   const pins = usePins()
-  const ghosts = useProjectOverview(project.id).data?.ghosts
+  const overview = useProjectOverview(project.id)
+  const ghosts = overview.data?.ghosts
   const setGhost = useSetGhost(project.id)
   const wake = useWakeGhost(project.id)
   const [history, setHistory] = useState(false)
@@ -60,7 +63,8 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
   const threads = useThreads(project.id, wtId, hasPr)
   const checks = useChecks(project.id, wtId, hasPr)
   const sdk = useSdkStatus(project.id, wtId, !!d)
-  const me = useHealth().data?.github ?? null
+  const health = useHealth().data
+  const me = health?.github ?? null
   // Début de détail tiré de la vue du projet : en-tête tout de suite, contenu à l'arrivée de la vraie réponse.
   const partial = q.isPlaceholderData
 
@@ -69,11 +73,13 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
 
   const { worktree: w, ticket, pr } = d
   const review = w.kind === 'review' && !!pr
-  const state: PrState = { d, partial, threads: threads.data, checks: checks.data, sdk: sdk.data, rules, me }
+  const asked = overview.data?.requestedReviews
+  const state: PrState = { d, partial, threads: threads.data, checks: checks.data, sdk: sdk.data, rules, me, reviewAsked: asked && d.pr ? asked.includes(d.pr.number) : undefined, postman: health?.postman }
   const sections = buildSections(state)
   const next = w.merged ? null : nextStep(state)
   const active = sections.some((s) => s.key === tab) ? tab! : next?.tab && sections.some((s) => s.key === next.tab) ? next.tab : sections[0].key
   const status = sections.filter((s) => s.group === 'status')
+  const tools = sections.filter((s) => s.group === 'tools')
   const ok = status.filter((s) => s.state === 'ok').length
   const ctx = { project, detail: d, wtId }
   const pinned = pins.isPinned(project.id, wtId)
@@ -132,6 +138,9 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
           <span className="flex items-center gap-1.5">
             {ticket ? <><a className="font-mono text-[13px] font-medium text-foreground hover:underline" href={ticket.url} target="_blank" rel="noreferrer">{ticket.id}</a><TicketStatus project={project} ticket={ticket} /></> : w.localTicket ? <Badge tone="gray">Ticket local</Badge> : <span>{w.ticketId ?? 'Sans ticket'}</span>}
             <LinkTicket project={project} worktree={w} hasTicket={!!w.ticketId} />
+            {/* Tickets associés : faits dans ce même worktree et sa PR, avec le ticket principal. */}
+            {(w.extraTicketIds ?? []).map((id) => <ExtraTicket key={id} project={project} wtId={wtId} id={id} ticket={d.extraTickets?.find((t) => t.id === id)} />)}
+            {w.ticketId && w.kind !== 'review' && <LinkTicket project={project} worktree={w} hasTicket add />}
           </span>
           <span aria-hidden>·</span>
           <span className="max-w-full truncate font-mono text-xs" title={w.path}>{w.branch ?? w.head}{pr && ` → ${pr.base}`}</span>
@@ -147,7 +156,7 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
 
       {history && pr && <PrTimeline pr={pr} />}
 
-      {w.merged && <FinishBanner project={project} wtId={wtId} merged={w.merged} ticketId={w.ticketId} dirty={d.dirtyFiles.length} review={w.kind === 'review'} />}
+      {w.merged && <FinishBanner project={project} wtId={wtId} merged={w.merged} ticketId={worktreeTicketIds(w).join(' et ') || null} many={worktreeTicketIds(w).length > 1} dirty={d.dirtyFiles.length} review={w.kind === 'review'} />}
       {next && (
         <div className={cn('flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border px-4 py-3', NEXT_TONE[next.tone])}>
           <div className="min-w-0 flex-1">
@@ -175,6 +184,12 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
           <div className="overflow-hidden rounded-xl border bg-card">
             {sections.filter((s) => s.group === 'work').map((s) => <SectionButton key={s.key} s={s} active={active === s.key} onClick={() => goTo(s.key)} />)}
           </div>
+          {tools.length > 0 && (
+            <div className="overflow-hidden rounded-xl border bg-card">
+              <p className="px-3 py-2 text-xs font-medium text-muted-foreground">Outils</p>
+              {tools.map((s) => <SectionButton key={s.key} s={s} active={active === s.key} onClick={() => goTo(s.key)} />)}
+            </div>
+          )}
         </nav>
 
         <div className="min-w-0">
@@ -188,12 +203,29 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
           {!partial && active === 'ci' && <CiTab {...ctx} />}
           {!partial && active === 'checks' && <ChecksTab {...ctx} />}
           {!partial && active === 'sdk' && <SdkPanel {...ctx} />}
+          {!partial && active === 'postman' && <PostmanTab {...ctx} />}
           {!partial && active === 'logs' && <LogsTab {...ctx} />}
           {!partial && active === 'reviewers' && pr && <ReviewersBar project={project} wtId={wtId} pr={pr} />}
           {!partial && active === 'conflicts' && (w.kind === 'review' ? <ReviewSyncTab {...ctx} /> : <ConflictsTab {...ctx} />)}
         </div>
       </div>
     </div>
+  )
+}
+
+/** Ticket associé au worktree, dans l'en-tête : son lien, son statut, et de quoi le retirer (son statut Linear ne change pas). */
+function ExtraTicket({ project, wtId, id, ticket }: { project: Project; wtId: string; id: string; ticket: Ticket | undefined }) {
+  const remove = useRemoveExtraTicket(project.id)
+  const toast = useToast()
+  return (
+    <span className="flex items-center gap-1.5">
+      <span aria-hidden>+</span>
+      {ticket ? <><a className="font-mono text-[13px] font-medium text-foreground hover:underline" href={ticket.url} target="_blank" rel="noreferrer" title={ticket.title}>{id}</a><TicketStatus project={project} ticket={ticket} /></> : <span className="font-mono text-[13px]">{id}</span>}
+      <Button variant="ghost" size="icon-sm" className="size-5" aria-label={`Retirer ${id} de ce worktree`} disabled={remove.isPending}
+        onClick={() => confirm(`Retirer ${id} de ce worktree ? Le ticket garde son statut dans Linear.`) && remove.mutate({ wt: wtId, ticketId: id }, { onSuccess: () => toast(`${id} retiré de ce worktree`), onError: (e) => toast(e.message, true) })}>
+        {remove.isPending ? <Spinner className="size-3" /> : <XIcon className="size-3" />}
+      </Button>
+    </span>
   )
 }
 
@@ -226,13 +258,15 @@ function SectionButton({ s, active, onClick }: { s: Section; active: boolean; on
 
 
 /** Ce qui débloque le worktree, dans l'ordre : conflits, commentaires, CI, SDK, contrôles, retard sur la base, auto-review, labels, relance, tests, merge. */
-function nextStep({ d, threads, checks, sdk, rules, me }: PrState): NextStep {
+function nextStep(state: PrState): NextStep {
+  const { d, threads, checks, sdk, rules, me } = state
   const { worktree: w, pr } = d
   if (pr && w.kind === 'review') {
     if (d.behindRemote) return { tone: 'amber', title: `${plural(d.behindRemote, 'nouveau commit', 'nouveaux commits')} sur la PR${d.remoteAuthors.length ? ` par ${d.remoteAuthors.join(', ')}` : ''}`, detail: 'Ton worktree est resté sur l’ancienne version : récupère-les pour relire et tester le code à jour.', tab: 'conflicts', label: 'Récupérer la branche' }
     const replies = myOpenThreads(threads).filter((t) => !t.awaitingReviewer)
     if (replies.length && awaitsReview(pr, rules)) return { tone: 'purple', title: `${pr.author} a répondu à ${plural(replies.length, 'de tes retours', 'de tes retours')}`, detail: 'Vérifie les correctifs avant de relancer une review complète.', tab: 'followup', label: 'Vérifier les correctifs' }
-    if (awaitsReview(pr, rules) || (me && pr.requestedReviewers.includes(me))) return { tone: 'purple', title: `Review demandée par ${pr.author}`, detail: `+${pr.additions} −${pr.deletions} · ${plural(pr.changedFiles, 'fichier', 'fichiers')}`, tab: 'review', label: 'Lancer la review' }
+    if (reviewToDo(state)) return { tone: 'purple', title: `Review demandée par ${pr.author}`, detail: `+${pr.additions} −${pr.deletions} · ${plural(pr.changedFiles, 'fichier', 'fichiers')}`, tab: 'review', label: 'Lancer la review' }
+    if (me && pr.requestedReviewers.includes(me)) return { tone: 'gray', title: 'Reviewer, mais la PR n’est pas encore prête à relire', detail: `${pr.author} n’a pas encore posé le label de review du dépôt : elle ne compte pas dans tes tâches.` }
     return { tone: 'gray', title: 'Review rendue', detail: `En attente de ${pr.author}.` }
   }
   if (pr) {
@@ -381,8 +415,8 @@ export interface TabProps {
   wtId: string
 }
 
-/** Ma PR est mergée : « Aboutir le projet » passe le ticket en Done et supprime le worktree. */
-function FinishBanner({ project, wtId, merged, ticketId, dirty, review }: { project: Project; wtId: string; merged: NonNullable<Worktree['merged']>; ticketId: string | null; dirty: number; review: boolean }) {
+/** Ma PR est mergée : « Aboutir le projet » passe le ticket (et ses tickets associés) en Done et supprime le worktree. */
+function FinishBanner({ project, wtId, merged, ticketId, many, dirty, review }: { project: Project; wtId: string; merged: NonNullable<Worktree['merged']>; ticketId: string | null; many: boolean; dirty: number; review: boolean }) {
   const finish = useFinishWorktree(project.id)
   const remove = useRemoveWorktree(project.id)
   const toast = useToast()
@@ -416,6 +450,36 @@ function FinishBanner({ project, wtId, merged, ticketId, dirty, review }: { proj
       </div>
     )
   }
+  // Ma PR fermée sans merge : rien n'a été livré, le ticket garde son statut ; seul le worktree se supprime.
+  if (closed) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4">
+        <div className="flex min-w-0 flex-1 gap-3">
+          <GitPullRequestClosedIcon className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="min-w-0">
+            <p className="font-medium text-amber-800 dark:text-amber-300">
+              <a href={merged.url} target="_blank" rel="noreferrer" className="hover:underline">PR #{merged.number}</a> fermée sans merge
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {dirty
+                ? `Il reste ${plural(dirty, 'fichier non commité', 'fichiers non commités')} : commite-les ou annule-les avant de supprimer le worktree.`
+                : `Le worktree peut être supprimé. La branche est conservée${ticketId ? `, et ${many ? `les tickets ${ticketId} gardent leur statut` : `le ticket ${ticketId} garde son statut`}` : ''}. Pour reprendre le travail, rouvre la PR sur GitHub.`}
+            </p>
+          </div>
+        </div>
+        <Button size="sm" disabled={remove.isPending || dirty > 0} onClick={() => {
+          if (!confirm(`Supprimer ce worktree ? La PR #${merged.number} est fermée sans merge : la branche est conservée.`)) return
+          remove.mutate(wtId, {
+            onSuccess: () => {
+              toast('Worktree supprimé')
+              go({ page: 'overview', project: project.id })
+            },
+            onError: (e) => toast(e.message, true),
+          })
+        }}>{remove.isPending ? <Spinner /> : <Trash2Icon />}Supprimer le worktree</Button>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-500/30 bg-violet-500/5 px-5 py-4">
       <div className="flex min-w-0 flex-1 gap-3">
@@ -427,7 +491,7 @@ function FinishBanner({ project, wtId, merged, ticketId, dirty, review }: { proj
           <p className="mt-0.5 text-sm text-muted-foreground">
             {dirty
               ? `Il reste ${plural(dirty, 'fichier non commité', 'fichiers non commités')} : commite-les ou annule-les avant d’aboutir.`
-              : `${linear ? `Le ticket ${ticketId} passe en Done et le` : 'Le'} worktree est supprimé. La branche est conservée.`}
+              : `${linear ? `${many ? `Les tickets ${ticketId} passent` : `Le ticket ${ticketId} passe`} en Done et le` : 'Le'} worktree est supprimé. La branche est conservée.`}
           </p>
         </div>
       </div>
@@ -435,7 +499,7 @@ function FinishBanner({ project, wtId, merged, ticketId, dirty, review }: { proj
         if (!confirm(linear ? `Passer ${ticketId} en Done et supprimer ce worktree ?` : 'Supprimer ce worktree ?')) return
         finish.mutate(wtId, {
           onSuccess: (r) => {
-            toast(r.ticket ? `${r.ticket.id} passé en ${r.ticket.state} · worktree supprimé` : 'Worktree supprimé')
+            toast(r.ticket ? `${r.tickets.map((t) => t.id).join(' et ')} ${r.tickets.length > 1 ? 'passés' : 'passé'} en ${r.ticket.state} · worktree supprimé` : 'Worktree supprimé')
             go({ page: 'overview', project: project.id })
           },
           onError: (e) => toast(e.message, true),

@@ -63,7 +63,11 @@ export function useLatestRun(filter: RunFilter & { project: string; kind: Action
   // Fin d'un run : ce qu'il a pu écrire (commit, push, réponses GitHub) se voit dans le worktree et la vue du projet.
   const live = useRun(id, () => {
     void qc.invalidateQueries({ queryKey: qk.overview(filter.project) })
-    if (filter.worktree) void qc.invalidateQueries({ queryKey: qk.worktree(filter.project, filter.worktree) })
+    if (filter.worktree) {
+      void qc.invalidateQueries({ queryKey: qk.worktree(filter.project, filter.worktree) })
+      // Fils, commentaires généraux et rapports des contrôles : un push les change, on ne garde pas l'état d'avant.
+      void qc.invalidateQueries({ queryKey: qk.threads(filter.project, filter.worktree) })
+    }
   })
   const toast = useToast()
   return {

@@ -1,3 +1,4 @@
+import { coversTicket } from '../../../shared/text.ts'
 import { CalendarDaysIcon, ChartColumnIcon, ClipboardCheckIcon, FileTextIcon, FolderGit2Icon, GitBranchIcon, GitPullRequestIcon, InboxIcon, LayoutDashboardIcon, LightbulbIcon, PlusIcon, SearchIcon, SettingsIcon, StickyNoteIcon, TicketIcon, ZapIcon, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Project, ProjectOverview } from '../../../shared/types.ts'
@@ -32,14 +33,14 @@ function entries(projects: Project[], current: Project | undefined, ov: ProjectO
         icon: pr ? GitPullRequestIcon : GitBranchIcon, to: { page: 'worktree', project: current.id, wt: w.id }, keywords: [w.branch, w.ticketId, ov.tickets.find((t) => t.id === w.ticketId)?.title, w.localTicket?.title, pr?.title, pr && `#${pr.number}`, pr?.author].join(' '),
       })
     }
-    for (const t of ov.tickets.filter((t) => isActiveTicket(t) && !ov.worktrees.some((w) => w.ticketId === t.id))) {
+    for (const t of ov.tickets.filter((t) => isActiveTicket(t) && !ov.worktrees.some((w) => coversTicket(w, t.id)))) {
       out.push({ id: `t:${t.id}`, label: t.title, hint: `${t.id} · ${t.status}`, group: 'Tickets sans worktree', icon: TicketIcon, to: { page: 'create', project: current.id, ticket: t.id }, keywords: t.id })
     }
   }
   const pages: [string, LucideIcon, Route][] = current
     ? [['Accueil · file d’attente', LayoutDashboardIcon, { page: 'overview', project: current.id }], ['Accueil · tickets', TicketIcon, { page: 'overview', project: current.id, tab: 'tickets' }], ['Accueil · mes PR', TicketIcon, { page: 'overview', project: current.id, tab: 'mypr' }], ['Accueil · reviews', TicketIcon, { page: 'overview', project: current.id, tab: 'reviews' }], ['Accueil · CI', TicketIcon, { page: 'overview', project: current.id, tab: 'ci' }], ['Nouveau worktree', PlusIcon, { page: 'create', project: current.id }], ['Features & optimisations', LightbulbIcon, { page: 'insights', project: current.id }]]
     : []
-  if (current) pages.push(['Nouveau ticket', PlusIcon, { page: 'new-ticket', project: current.id }], ['Pre-check d’un ticket', ClipboardCheckIcon, { page: 'precheck', project: current.id }], ['Tickets rapides', ZapIcon, { page: 'quick', project: current.id }])
+  if (current) pages.push(['Nouveau ticket', PlusIcon, { page: 'new-ticket', project: current.id }], ['Pre-check d’un ticket', ClipboardCheckIcon, { page: 'precheck', project: current.id }], ['Modification rapide', ZapIcon, { page: 'quick-change', project: current.id }], ['Tickets rapides', ZapIcon, { page: 'quick', project: current.id }])
   pages.push(['Automatisations', ZapIcon, { page: 'automations' }], ['À valider · tous projets', InboxIcon, { page: 'inbox' }], ['Notes', StickyNoteIcon, { page: 'notes' }], ['Daily', CalendarDaysIcon, { page: 'daily' }], ['Stats', ChartColumnIcon, { page: 'stats' }], ['Prompts', FileTextIcon, { page: 'prompts' }], ['Réglages', SettingsIcon, { page: 'settings' }])
   for (const [label, icon, to] of pages) out.push({ id: `page:${label}`, label, hint: '', group: 'Pages', icon, to, keywords: '' })
   for (const p of projects) out.push({ id: `p:${p.id}`, label: p.name, hint: p.repo, group: 'Projets', icon: FolderGit2Icon, to: { page: 'overview', project: p.id }, keywords: p.repo })

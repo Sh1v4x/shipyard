@@ -9,6 +9,7 @@ import type {
   Finding,
   InsightItem,
   NewIssue,
+  PostmanRequestData,
   Note,
   ReviewComment,
   ReviewDecisions,
@@ -87,6 +88,8 @@ export const actionInput = z.object({
   ref: optional(z.string()),
   extra: optional(z.string()),
   ticketId: optional(z.string()),
+  extraTickets: optional(z.array(z.string())),
+  runCalls: optional(z.boolean()),
   finding: optional(finding),
   findings: optional(z.array(finding)),
   threadId: optional(z.string()),
@@ -94,6 +97,7 @@ export const actionInput = z.object({
   action: optional(z.string()),
   job: optional(z.object({ id: z.string(), name: z.string(), workflow: z.string().nullable(), jobId: z.string().nullable() })),
   commits: optional(z.array(z.object({ title: z.string(), files: z.array(z.string()), project: z.string().optional() }))),
+  discard: optional(z.array(z.string())),
   feedback: optional(z.string()),
   previousRunId: optional(z.string()),
   planRunId: optional(z.string()),
@@ -135,6 +139,7 @@ export const createWorktreeInput = z.object({
   branch: z.string().optional(),
   base: z.string().optional(),
   ticketId: z.string().optional(),
+  extraTickets: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9]*-\d+$/)).optional(),
   prNumber: z.number().int().positive().optional(),
 }) satisfies z.ZodType<CreateWorktreeInput>
 
@@ -151,6 +156,7 @@ const runId = z.string().regex(/^[\w-]+$/)
 export const abandonInput = z.object({ plan: runId.optional(), work: runId.optional(), all: z.boolean().optional() })
 export const fileViewedInput = z.object({ prId: id, path: z.string().min(1), viewed: z.boolean() })
 export const linkTicketInput = z.object({ ticketId: z.string().nullable() })
+export const addTicketInput = z.object({ ticketId: id })
 export const threadReplyInput = z.object({ threadId: id, body: z.string(), resolve: z.boolean() })
 
 export const createPullRequestInput = z.object({
@@ -188,7 +194,22 @@ export const updateNoteInput = z.object({
   project: z.string().nullable().optional(),
 }) satisfies z.ZodType<Partial<Pick<Note, 'text' | 'done' | 'project'>>>
 
-export const credentialsInput = z.object({ linearKey: z.string().nullable().optional(), githubToken: z.string().nullable().optional() })
+export const credentialsInput = z.object({ linearKey: z.string().nullable().optional(), githubToken: z.string().nullable().optional(), postmanKey: z.string().nullable().optional() })
+export const postmanLinkInput = z.object({ workspaceId: z.string().nullable(), collectionId: id, folderId: z.string().nullable() })
+const postmanRequestData = z.object({
+  name: z.string().min(1),
+  method: z.string().regex(/^[A-Za-z]+$/),
+  url: z.string().min(1),
+  headers: z.array(z.object({ key: z.string().min(1), value: z.string() })),
+  body: z.string().nullable(),
+  description: z.string(),
+}) satisfies z.ZodType<PostmanRequestData>
+/** Requête du dossier (requestId), brouillon pas encore enregistré (request), ou version modifiée d'une requête (les deux : le brouillon garde son autorisation). */
+export const postmanRunInput = z.object({ requestId: z.string().optional(), request: postmanRequestData.optional() }).refine((b) => !!b.requestId || !!b.request, { message: 'requestId ou request attendu' })
+export const postmanSaveInput = postmanRequestData.extend({ folder: z.string() })
+export const postmanEnvironmentInput = z.object({ environmentId: z.string().nullable() })
+export const postmanVariableInput = z.object({ key: z.string().regex(/^[^{}\s]+$/), value: z.string().nullable() })
+export const postmanApplyInput = z.object({ runId, indexes: z.array(z.number().int().nonnegative()).min(1) })
 
 export const settingsInput = z.object({
   labels: z.partialRecord(z.enum(LABEL_ROLE_KEYS), z.array(z.string())).optional(),

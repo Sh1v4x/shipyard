@@ -132,7 +132,8 @@ export async function discardFiles(cwd: string, files: { status: string; path: s
   const tracked = files.filter((f) => f.status !== '?' && f.status !== '??').map((f) => f.path)
   const untracked = files.filter((f) => f.status === '?' || f.status === '??').map((f) => f.path)
   if (tracked.length) await git(cwd, ['restore', '--staged', '--worktree', '--', ...tracked])
-  for (const f of untracked) rmSync(join(cwd, f), { force: true })
+  // Un dossier entièrement non suivi apparaît comme une seule entrée (`coverage/`) : il part en entier.
+  for (const f of untracked) rmSync(join(cwd, f), { force: true, recursive: true })
 }
 
 export async function commitsAhead(cwd: string, base: string): Promise<string[]> {
@@ -288,6 +289,31 @@ export async function abortMerge(cwd: string) {
   await git(cwd, ['merge', '--abort'])
 }
 
+const PRISMA_SCHEMA = /(^|\/)prisma\/schema\.prisma$/
+
+/**
+ * Génère le client Prisma de chaque schéma du dépôt (ou de ceux donnés), et renvoie les paquets traités.
+ * prisma generate ne touche à aucune base de données : il lit le schéma et écrit le client dans node_modules.
+ */
+export async function generatePrismaClients(cwd: string, log: (text: string) => void = () => undefined, only?: string[]): Promise<string[]> {
+  const schemas = only ?? (await git(cwd, ['ls-files', '--', '*prisma/schema.prisma'])).split('\n').filter((f) => PRISMA_SCHEMA.test(f) && !f.includes('node_modules/'))
+  const done: string[] = []
+  for (const schema of schemas) {
+    // Depuis le paquet du schéma (ses générateurs y sont référencés en chemins relatifs), via son script s'il en a un.
+    const rel = dirname(dirname(schema))
+    const pkg = join(cwd, rel)
+    if (!existsSync(join(pkg, 'package.json'))) continue
+    const scripts = (JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')) as { scripts?: Record<string, string> }).scripts ?? {}
+    const script = Object.entries(scripts).find(([, v]) => /^prisma generate\b/.test(v))?.[0]
+    log(`${script ? `bun run ${script}` : 'prisma generate'} dans ${rel}`)
+    // Une URL fictive suffit quand le worktree n'a pas de .env : la commande ne se connecte pas.
+    const env = { ...process.env, PATH: `${process.env.HOME}/.bun/bin:${process.env.PATH}`, DATABASE_URL: process.env.DATABASE_URL ?? 'postgresql://user:pass@localhost:5432/generate' }
+    await run('bun', script ? ['run', script] : ['x', 'prisma', 'generate'], { cwd: pkg, timeoutMs: 300_000, env })
+    done.push(rel)
+  }
+  return done
+}
+
 /**
  * Termine la fusion : tout est ajouté, commit de fusion avec le message par défaut de git, puis push.
  * Relançable : si le commit est déjà fait (étape interrompue), seul le push est refait.
@@ -297,17 +323,9 @@ export async function finishMerge(cwd: string, branch: string, log: (text: strin
     await git(cwd, ['add', '-A'])
     // La base apporte souvent des migrations : sans client Prisma régénéré, la vérification des types du hook
     // de pre-commit échoue sur les nouvelles tables. prisma generate ne touche à aucune base de données.
-    const schemas = (await git(cwd, ['diff', '--cached', '--name-only'])).split('\n').filter((f) => /(^|\/)prisma\/schema\.prisma$/.test(f))
-    for (const schema of schemas) {
-      // Depuis le paquet du schéma (ses générateurs y sont référencés en chemins relatifs), via son script s'il en a un.
-      const pkg = join(cwd, dirname(dirname(schema)))
-      const scripts = (JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')) as { scripts?: Record<string, string> }).scripts ?? {}
-      const script = Object.entries(scripts).find(([, v]) => /^prisma generate\b/.test(v))?.[0]
-      log(`Schéma Prisma modifié par la fusion : ${script ? `bun run ${script}` : 'prisma generate'} dans ${dirname(dirname(schema))}`)
-      // prisma generate ne se connecte pas : une URL fictive suffit quand le worktree n'a pas de .env.
-      const env = { ...process.env, PATH: `${process.env.HOME}/.bun/bin:${process.env.PATH}`, DATABASE_URL: process.env.DATABASE_URL ?? 'postgresql://user:pass@localhost:5432/generate' }
-      await run('bun', script ? ['run', script] : ['x', 'prisma', 'generate'], { cwd: pkg, timeoutMs: 300_000, env })
-    }
+    const schemas = (await git(cwd, ['diff', '--cached', '--name-only'])).split('\n').filter((f) => PRISMA_SCHEMA.test(f))
+    if (schemas.length) log('Schéma Prisma modifié par la fusion : client à régénérer.')
+    await generatePrismaClients(cwd, log, schemas)
     // Types générés par `next dev` avant la fusion : ils référencent des pages déplacées par la base et font échouer
     // la vérification des types du hook. Cache ignoré par git, régénéré au prochain `next dev`.
     for (const dir of nextDevTypes(cwd)) {

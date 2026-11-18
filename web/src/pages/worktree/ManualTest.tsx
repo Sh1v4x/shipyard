@@ -2,6 +2,8 @@ import { CheckIcon, ClipboardCopyIcon, CopyIcon, ExternalLinkIcon, HandIcon, Pla
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Label as FieldLabel } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type { ManualTestOutput, Project, Run, TestCheckOutput } from '../../../../shared/types.ts'
 import { useOpenManualEnv, useSaveManualSteps, useSetCheckDecision, useStopManualEnv } from '../../data/mutations.ts'
@@ -37,6 +39,9 @@ export function ManualTest({ project, wtId, consigne, mine }: { project: Project
   const r = prep.result
   const live = env.data && env.data.runId === prep.id ? env.data : null
   const { checked, toggle } = useChecked(project.id, wtId, prep.run)
+  // Mes consignes pour la préparation ; sans rien ici, celles du test IA (au-dessus) servent aussi.
+  const [instructions, setInstructions] = useState('')
+  const extra = instructions.trim() || consigne
 
   return (
     <section className="flex flex-col gap-4" aria-label="Test manuel">
@@ -50,9 +55,16 @@ export function ManualTest({ project, wtId, consigne, mine }: { project: Project
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <PromptMenu items={[['test-manual', 'Préparer un test manuel']]} />
-          <Button size="sm" variant={r ? 'outline' : 'default'} disabled={prep.busy} onClick={() => prep.start({ extra: consigne })}>
+          <Button size="sm" variant={r ? 'outline' : 'default'} disabled={prep.busy} onClick={() => prep.start({ extra })}>
             {prep.busy ? <Spinner /> : <PlayIcon />}{r ? 'Relancer la préparation' : 'Préparer le test manuel'}
           </Button>
+        </div>
+        <div className="flex basis-full flex-col gap-2">
+          <FieldLabel htmlFor={`manual-consigne-${wtId}`}>Consignes pour la préparation <span className="font-normal text-muted-foreground">(facultatif)</span></FieldLabel>
+          <Textarea id={`manual-consigne-${wtId}`} rows={2} value={instructions} onChange={(e) => setInstructions(e.target.value)}
+            placeholder="Ex. : prépare une company GB pour tester la connexion HMRC · je veux les trois états (pas connecté, connecté, reconnexion) · l’API tourne déjà sur le port 3101." />
+          {!instructions.trim() && consigne.trim() && <p className="text-xs text-muted-foreground">Sans consigne ici, celles du test IA ci-dessus sont reprises.</p>}
+          {prep.run?.request && !prep.busy && <p className="text-xs text-muted-foreground">Dernière préparation faite avec : <span className="whitespace-pre-line text-foreground">{prep.run.request}</span></p>}
         </div>
       </div>
       <RunPanel id={prep.id} events={prep.events} running={prep.running} run={prep.run} label="Préparation, puis lancement de l’app" onStop={prep.stop} action={prep} />

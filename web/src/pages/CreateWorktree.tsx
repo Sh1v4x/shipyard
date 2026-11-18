@@ -1,4 +1,4 @@
-import { GitBranchIcon, RefreshCwIcon, SparklesIcon, XIcon } from 'lucide-react'
+import { CheckIcon, GitBranchIcon, PlusIcon, RefreshCwIcon, SparklesIcon, XIcon } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { BranchNameOutput, Project } from '../../../shared/types.ts'
 import { Button } from '@/components/ui/button'
@@ -11,7 +11,7 @@ import { useBranches, useProjectOverview } from '../data/queries.ts'
 import { useAction } from '../data/runs.ts'
 import { go, href } from '../router.ts'
 import { Badge, ErrorBox, Pill, PromptMenu, Spinner, ticketTone, useToast } from '../ui.tsx'
-import { slugify } from '../../../shared/text.ts'
+import { coversTicket, slugify } from '../../../shared/text.ts'
 
 type Mode = 'ticket' | 'existing' | 'new'
 const PREFIXES = ['feat', 'fix', 'refactor', 'chore']
@@ -24,6 +24,8 @@ export function CreateWorktreePage({ project, ticketId, initialMode }: { project
   const toast = useToast()
   const [mode, setMode] = useState<Mode>((initialMode as Mode) ?? (ticketId || project.team ? 'ticket' : 'new'))
   const [ticket, setTicket] = useState<string | undefined>(ticketId)
+  // Tickets liés au ticket choisi, faits dans ce même worktree et sa PR.
+  const [withTickets, setWithTickets] = useState<string[]>([])
   const [prefix, setPrefix] = useState('feat')
   const [name, setName] = useState<string | null>(null)
   const [slug, setSlug] = useState('')
@@ -44,7 +46,8 @@ export function CreateWorktreePage({ project, ticketId, initialMode }: { project
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t?.id, naming.loading])
 
-  const candidates = (ov.data?.tickets ?? []).filter((x) => x.statusType !== 'completed' && x.statusType !== 'canceled' && !ov.data?.worktrees.some((w) => w.ticketId === x.id))
+  const candidates = (ov.data?.tickets ?? []).filter((x) => x.statusType !== 'completed' && x.statusType !== 'canceled' && !ov.data?.worktrees.some((w) => coversTicket(w, x.id)))
+  const extra = withTickets.filter((id) => id !== ticket && candidates.some((c) => c.id === id))
   const suggested = t && naming.result ? `${prefix}/${t.id}-${slugify(naming.result.slug)}` : ''
   const usedBranches = new Set(ov.data?.worktrees.map((w) => w.branch))
   // Jamais main / master comme base quand le dépôt a develop (le serveur le refuse aussi).
@@ -64,7 +67,7 @@ export function CreateWorktreePage({ project, ticketId, initialMode }: { project
 
   const create = () => {
     setError(null)
-    createWorktree.mutate({ mode, branch, base, ticketId: t?.id }, {
+    createWorktree.mutate({ mode, branch, base, ticketId: t?.id, extraTickets: mode === 'ticket' && t ? extra : undefined }, {
       onSuccess: (r) => {
         toast(`Worktree créé : ${r.path}`)
         go({ page: 'worktree', project: project.id, wt: r.id })
@@ -110,23 +113,33 @@ export function CreateWorktreePage({ project, ticketId, initialMode }: { project
             {project.team && candidates.length === 0 && <p className="text-sm text-muted-foreground">Tous les tickets ouverts ont déjà un worktree.</p>}
             {candidates.length > 0 && (
               <div className="flex max-h-80 flex-col gap-1 overflow-auto rounded-lg border p-1">
-                {candidates.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    aria-pressed={ticket === c.id}
-                    onClick={() => setTicket(c.id)}
-                    className={cn(
-                      'flex items-center gap-3 rounded-md border border-transparent px-3 py-2 text-left text-sm transition-colors hover:bg-accent',
-                      ticket === c.id && 'border-ring bg-accent',
-                    )}
-                  >
-                    <span className="min-w-20 font-mono text-xs font-medium">{c.id}</span>
-                    <span className="min-w-0 flex-1">{c.title}</span>
-                    <Badge tone={ticketTone(c.statusType)}>{c.status}</Badge>
-                  </button>
-                ))}
+                {candidates.map((c) => {
+                  const added = extra.includes(c.id)
+                  return (
+                    <div key={c.id} className={cn('flex items-center gap-1 rounded-md border border-transparent transition-colors hover:bg-accent', ticket === c.id && 'border-ring bg-accent', added && 'border-blue-500/40 bg-blue-500/5')}>
+                      <button type="button" aria-pressed={ticket === c.id} onClick={() => setTicket(c.id)} className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-left text-sm">
+                        <span className="min-w-20 font-mono text-xs font-medium">{c.id}</span>
+                        <span className="min-w-0 flex-1">{c.title}</span>
+                        <Badge tone={ticketTone(c.statusType)}>{c.status}</Badge>
+                      </button>
+                      {/* Un ticket principal choisi : les autres peuvent se faire avec lui. */}
+                      {t && ticket !== c.id && (
+                        <Button variant={added ? 'secondary' : 'ghost'} size="sm" className="mr-1 h-7 shrink-0 px-2 text-xs" aria-pressed={added} title={`Faire ${c.id} dans le même worktree et la même PR que ${t.id}`}
+                          onClick={() => setWithTickets(added ? withTickets.filter((x) => x !== c.id) : [...withTickets, c.id])}>
+                          {added ? <CheckIcon /> : <PlusIcon />}{added ? 'Avec' : 'Faire avec'}
+                        </Button>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
+            )}
+            {t && (
+              <p className="text-xs text-muted-foreground">
+                {extra.length
+                  ? <>Un seul worktree et une seule PR pour <span className="font-mono">{[t.id, ...extra].join(' + ')}</span>. La branche porte <span className="font-mono">{t.id}</span>.</>
+                  : <>Deux tickets liés ? « Faire avec » sur un autre ticket l’associe à <span className="font-mono">{t.id}</span> : même worktree, même PR.</>}
+              </p>
             )}
             {t && (
               <div className="flex flex-col gap-2 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3">

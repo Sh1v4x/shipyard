@@ -6,6 +6,7 @@ import * as linear from '../lib/linear.ts'
 import * as svc from '../services.ts'
 import { claudeUsage } from '../lib/usage.ts'
 import { brokenWorktrees, repairWorktree } from '../lib/brokenWorktrees.ts'
+import { postmanConfigured } from '../lib/postman.ts'
 import { Hono } from 'hono'
 import { force } from '../http.ts'
 import * as inputs from '../inputs.ts'
@@ -15,7 +16,7 @@ export const systemRoutes = new Hono()
 
 systemRoutes.get('/health', async (c) => {
   const [ghUser, claude] = await Promise.all([gh.me().catch(() => null), run('claude', ['--version']).then((v) => v.trim()).catch(() => null)])
-  return c.json({ github: ghUser, linear: linear.linearConfigured(), claude })
+  return c.json({ github: ghUser, linear: linear.linearConfigured(), postman: postmanConfigured(), claude })
 })
 
 /** GitHub Actions bloqué (facturation…) sur les comptes des projets suivis : un par organisation. */

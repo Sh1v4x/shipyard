@@ -25,12 +25,13 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
 // puis TanStack Query les met à jour en arrière-plan.
 
 // À changer quand la forme d'une donnée gardée change : l'ancien cache est alors ignoré.
-const PERSIST_KEY = 'devpanel:query-cache:v3'
+const PERSIST_KEY = 'devpanel:query-cache:v4'
 const PERSISTED = new Set(['projects', 'overview', 'worktree', 'prompts', 'ticket-states', 'linear-meta', 'notes', 'settings'])
 const MAX_AGE = 24 * 3600_000
 
 export function restoreCache() {
   try {
+    localStorage.removeItem('devpanel:query-cache:v3')
     const raw = localStorage.getItem(PERSIST_KEY)
     if (!raw) return
     const saved = JSON.parse(raw) as { at: number; state: Parameters<typeof hydrate>[1] }

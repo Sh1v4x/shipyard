@@ -107,6 +107,17 @@ worktreesRoutes.put(`${wt}/ticket`, async (c) => {
   return c.json(await svc.linkTicket(getProject(c.req.param('id')), c.req.param('wt'), b.ticketId))
 })
 
+/** Ticket de plus sur le worktree (principal s'il n'en a pas, associé sinon), et retrait d'un ticket associé. */
+worktreesRoutes.post(`${wt}/tickets`, async (c) => {
+  const b = await jsonBody(c, inputs.addTicketInput)
+  return c.json(await svc.addTicket(getProject(c.req.param('id')), c.req.param('wt'), b.ticketId))
+})
+
+worktreesRoutes.delete(`${wt}/tickets/:ticket`, (c) => {
+  svc.removeExtraTicket(getProject(c.req.param('id')), c.req.param('wt'), c.req.param('ticket'))
+  return c.json({ ok: true })
+})
+
 worktreesRoutes.post(`${wt}/threads/reply`, async (c) => {
   const b = await jsonBody(c, inputs.threadReplyInput)
   await gh.replyToThread(b.threadId, b.body, b.resolve)

@@ -7,6 +7,7 @@ import * as git from '../lib/git.ts'
 import * as gh from '../lib/github.ts'
 import type { LinkedWorktree } from '../services.ts'
 import { discardExcludedIn } from '../lib/excluded.ts'
+import { repairForHook } from '../lib/envRepair.ts'
 
 /** Sortie complète d'un hook git en échec (lefthook écrit sur stdout et stderr). */
 export function hookOutput(e: unknown): string {
@@ -73,8 +74,15 @@ export async function commitRepos(repos: CommitRepo[], title: string): Promise<s
     try {
       await discardExcludedIn(r.path)
       sha = await git.commitFiles(r.path, title, 'all')
-    } catch (e) {
-      throw new HookRefused(hookOutput(e), repos.slice(i), urls)
+    } catch (first) {
+      // Worktree pas prêt (dépendances, client Prisma) : la cause n'est pas le code. On répare et on retente une fois.
+      const done = await repairForHook(r.path, hookOutput(first), (text) => console.log(`[commit] ${text}`)).catch(() => [])
+      if (!done.length) throw new HookRefused(hookOutput(first), repos.slice(i), urls)
+      try {
+        sha = await git.commitFiles(r.path, title, 'all')
+      } catch (e) {
+        throw new HookRefused(hookOutput(e), repos.slice(i), urls)
+      }
     }
     if (!sha) continue
     await git.push(r.path, r.branch)

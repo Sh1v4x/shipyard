@@ -14,6 +14,7 @@ import { type WorktreeActions, assertNoMerge, specFrom, discardExcluded } from '
 import { commitRule, hookOutput } from './commitFlow.ts'
 import { manualTest } from '../lib/progress.ts'
 import { discardExcludedIn } from '../lib/excluded.ts'
+import { repairForHook } from '../lib/envRepair.ts'
 
 const PR_TEMPLATES = ['.github/pull_request_template.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/pull_request_template.md', 'pull_request_template.md']
 
@@ -63,6 +64,8 @@ export const commitsActions: WorktreeActions = {
     const context = [
       `Branch commits:\n${d.commitsAhead.map((c) => `- ${c}`).join('\n') || '(none)'}`,
       d.dirtyFiles.length ? `Warning: ${d.dirtyFiles.length} file(s) still uncommitted, they will not be part of the PR.` : '',
+      // Tickets associés : la PR les livre aussi, Linear la rattache à chacun par sa ligne « Resolves ».
+      d.extraTickets?.length ? `This PR also delivers ${d.extraTickets.map((t) => `${t.id} (${t.title}, ${t.url})`).join(' and ')}, done in the same branch as ${d.ticket?.id ?? 'the main ticket'}: the summary covers every ticket, and the links section has one \`Resolves <id>\` line per ticket.` : '',
       stat,
     ].filter(Boolean).join('\n\n')
     return startRun(
@@ -110,9 +113,26 @@ export const commitsActions: WorktreeActions = {
   },
   'commit-exec': async ({ kind, input, project, d, scope, cwd }) => {
     const commits = input.commits ?? []
-    if (!commits.length) throw new HttpError(400, 'Aucun commit à créer')
+    const wanted = [...new Set(input.discard ?? [])]
+    if (!commits.length && !wanted.length) throw new HttpError(400, 'Aucun commit à créer')
     assertNoMerge(d, 'commiter')
     await discardExcluded(d)
+    // Fichiers écartés à annuler : seulement des fichiers réellement modifiés de ce worktree ou d'un worktree lié
+    // (le chemin vient de l'interface), et jamais un fichier qui part dans un commit.
+    const committed = new Set(commits.flatMap((c) => c.files.map((f) => `${c.project ?? project.id}:${f}`)))
+    const dirtyOf = [{ project: project.id, cwd, name: project.name, files: d.dirtyFiles }, ...(d.linked ?? []).map((l) => ({ project: l.project, cwd: l.path, name: l.name, files: l.dirtyFiles }))]
+    // Un dossier entièrement non suivi est une seule entrée de git (`coverage/`) : un fichier écarté peut être dedans.
+    const safe = (f: string) => !f.startsWith('/') && !f.split('/').includes('..')
+    const toDiscard = dirtyOf.map((t) => ({
+      ...t,
+      files: wanted.filter(safe).flatMap((file) => {
+        if (committed.has(`${t.project}:${file}`)) return []
+        const exact = t.files.find((f) => f.path === file)
+        if (exact) return [exact]
+        const inside = t.files.some((f) => f.path.endsWith('/') && (f.status === '?' || f.status === '??') && file.startsWith(f.path))
+        return inside && existsSync(join(t.cwd, file)) ? [{ status: '??', path: file }] : []
+      }),
+    })).filter((t) => t.files.length)
     // Chaque commit se fait dans son worktree : celui-ci, ou un worktree lié (projet du groupe).
     const targets = new Map([
       [project.id, { cwd, branch: d.worktree.branch, repo: project.repo, name: project.name }],
@@ -125,8 +145,20 @@ export const commitsActions: WorktreeActions = {
       if (!t.branch) throw new HttpError(400, `Worktree sans branche (${t.name})`)
     }
     const multi = new Set(commits.map((c) => c.project ?? project.id)).size > 1
-    return startJob({ kind, title: `Commiter et pousser ${commits.length} commit(s)`, scope }, async (ctx): Promise<CommitExecOutput> => {
+    return startJob({ kind, title: commits.length ? `Commiter et pousser ${commits.length} commit(s)` : `Annuler ${wanted.length} fichier(s) écarté(s)`, scope }, async (ctx): Promise<CommitExecOutput> => {
       const results: CommitExecResult[] = []
+      const repaired = new Set<string>()
+      const discarded: string[] = []
+      for (const t of toDiscard) {
+        if (ctx.cancelled()) break
+        await git.discardFiles(t.cwd, t.files).then(
+          () => {
+            discarded.push(...t.files.map((f) => f.path))
+            ctx.log({ t: 'info', text: `${toDiscard.length > 1 || t.project !== project.id ? `${t.name} : ` : ''}modifications annulées, à ta demande : ${t.files.map((f) => f.path).join(', ')}` })
+          },
+          (e: Error) => ctx.log({ t: 'error', text: `Annulation impossible (${t.files.map((f) => f.path).join(', ')}) : ${e.message}` }),
+        )
+      }
       for (const c of commits) {
         const { cwd, branch, name } = targetOf(c)!
         // Les fichiers de la liste `exclude` dont le changement n'est que de la forme ont déjà été annulés : ce qui reste se commite.
@@ -156,6 +188,17 @@ export const commitsActions: WorktreeActions = {
             r.error = hookOutput(e)
             ctx.log({ t: 'error', text: `Refusé par un hook :\n${r.error.split('\n').slice(-25).join('\n')}` })
             await run('git', ['reset', '-q', '--', ...files], { cwd }).catch(() => undefined)
+            // Worktree pas prêt (dépendances absentes, client Prisma jamais généré) : rien à corriger dans le code.
+            // On répare et on retente, sans compter l'essai ni lancer d'agent ; une seule fois par worktree.
+            if (!repaired.has(cwd) && !ctx.cancelled()) {
+              repaired.add(cwd)
+              const done = await repairForHook(cwd, r.error, (text) => ctx.log({ t: 'info', text })).catch(() => [])
+              if (done.length) {
+                r.fixes.push(`Worktree préparé : ${done.join(', ')}.`)
+                r.attempts--
+                continue
+              }
+            }
             if (r.attempts >= MAX_COMMIT_ATTEMPTS || ctx.cancelled()) break
             const fix = await ctx.runChild(
               specFrom('commit-fix', { 'commit.title': r.title, 'commit.files': files.join(', '), error: r.error }, {
@@ -193,7 +236,7 @@ export const commitsActions: WorktreeActions = {
         const left = await git.dirtyFiles(t.cwd).catch(() => [])
         if (left.length) ctx.log({ t: 'info', text: `${targets.size > 1 ? `${t.name} : ` : ''}${left.length} fichier(s) restent non commités : ${left.map((f) => f.path).join(', ')}` })
       }
-      return { results, pushed: results.filter((x) => x.status === 'pushed').length, failed: results.filter((x) => x.status === 'failed').length }
+      return { results, pushed: results.filter((x) => x.status === 'pushed').length, failed: results.filter((x) => x.status === 'failed').length, discarded }
     })
   },
 }

@@ -11,6 +11,7 @@ import { useChecks } from '../../data/queries.ts'
 import { useAction } from '../../data/runs.ts'
 import { Badge, Empty, ErrorBox, PromptMenu, RunPanel, SectionLabel, Spinner, SuccessBox, ago, plural, useToast, type Tone } from '../../ui.tsx'
 import type { TabProps } from '../Worktree.tsx'
+import { actionsRunning } from './checklist.tsx'
 import { BlockedCommit } from '../../components/BlockedCommit.tsx'
 
 const STATUS: Record<CheckReport['status'], [string, Tone]> = { pass: ['Rien à signaler', 'green'], warn: ['À regarder', 'amber'], fail: ['En échec', 'red'] }
@@ -39,12 +40,12 @@ export function ChecksTab({ project, detail, wtId }: TabProps) {
       {checks.isLoading && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />Lecture des commentaires de la PR…</div>}
       <ErrorBox error={checks.error} />
       {checks.data && !reports.length && <Empty title="Aucun rapport de contrôle sur cette PR." />}
-      {reports.map((r) => <ReportCard key={r.id} report={r} project={project.id} wtId={wtId} mine={detail.pr!.mine} />)}
+      {reports.map((r) => <ReportCard key={r.id} report={r} project={project.id} wtId={wtId} mine={detail.pr!.mine} ciRunning={actionsRunning(detail.pr!)} />)}
     </section>
   )
 }
 
-function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; project: string; wtId: string; mine: boolean }) {
+function ReportCard({ report: r, project, wtId, mine, ciRunning }: { report: CheckReport; project: string; wtId: string; mine: boolean; /** Un job GitHub Actions tourne encore sur le dernier commit. */ ciRunning: boolean }) {
   const analysis = useAction<ChecksAnalyzeOutput>('checks-analyze', { project, worktree: wtId, ref: r.id }, { report: r.id })
   const fix = useAction<FixOutput>('checks-fix', { project, worktree: wtId, ref: r.id }, { report: r.id })
   const toast = useToast()
@@ -55,6 +56,14 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
   useEffect(() => setPicked(out?.items.filter((i) => i.verdict !== 'ask' && (i.blocking || (i.verdict === 'fix' && i.introduced))).map((i) => i.id) ?? []), [out])
   const selected = out?.items.filter((i) => picked.includes(i.id)) ?? []
   const [label, tone] = r.blocking == null ? STATUS[r.status] : GATE[r.blocking > 0 ? 'fail' : 'pass']
+  // Nouveau passage en cours : le rapport date du commit d'avant et la CI tourne. Son verdict ne vaut plus rien,
+  // on ne l'affiche pas comme l'état de la PR (un rapport qui ne suit pas les commits garde juste son badge gris).
+  const pending = r.stale && ciRunning
+  // Analyse faite sur une version précédente du rapport (réécrit depuis par un push) : ses problèmes ne sont plus à jour.
+  const analysedAt = analysis.run?.startedAt ?? null
+  const outdated = !!out && !!analysedAt && analysedAt < r.updatedAt && !analysis.busy
+  const [showOld, setShowOld] = useState(false)
+  const hideAnalysis = pending || (outdated && !showOld)
 
   // Mon message à l'agent qui a fait l'analyse : il la révise dans sa session, avec tout ce qu'il a déjà lu.
   const [message, setMessage] = useState('')
@@ -73,17 +82,20 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
     <article className="overflow-hidden rounded-xl border bg-card">
       <div className="flex flex-wrap items-center gap-2 px-5 py-3">
         <span className="font-semibold">{r.title}</span>
-        <Badge tone={tone}>{label}</Badge>
-        {r.stale && <Badge tone="gray">Ancien commit · nouveau passage attendu</Badge>}
-        <span className="text-xs text-muted-foreground">mis à jour {ago(r.updatedAt)}</span>
+        {pending ? <Badge tone="blue"><Spinner className="size-3" />Nouveau passage en cours</Badge> : <Badge tone={tone}>{label}</Badge>}
+        {r.stale && !pending && <Badge tone="gray">Pas mis à jour sur le dernier commit</Badge>}
+        <span className="text-xs text-muted-foreground">{pending ? 'rapport précédent : ' : ''}mis à jour {ago(r.updatedAt)}</span>
         <span className="ml-auto flex flex-wrap items-center gap-2">
           <Button variant="ghost" size="sm" asChild><a href={r.url} target="_blank" rel="noreferrer">Commentaire<ArrowUpRightIcon /></a></Button>
-          <Button variant={r.status === 'pass' ? 'outline' : 'default'} size="sm" disabled={analysis.busy} onClick={() => analysis.start({ report: r.id })}>
+          <Button variant={r.status === 'pass' || pending ? 'outline' : 'default'} size="sm" disabled={analysis.busy || pending} title={pending ? 'Attends le nouveau rapport : celui-ci date du commit précédent' : undefined} onClick={() => { setShowOld(false); void analysis.start({ report: r.id }) }}>
             {analysis.busy ? <Spinner /> : <SparklesIcon />}{out ? 'Ré-analyser' : 'Analyser'}
           </Button>
         </span>
       </div>
-      {r.blocking != null && (
+      {pending && (
+        <p className="px-5 pb-3 text-sm text-muted-foreground">Le contrôle tourne sur le dernier commit. Le rapport ci-dessous est celui du commit précédent : il sera remplacé à la fin du passage, et la page se met à jour toute seule.</p>
+      )}
+      {!pending && r.blocking != null && (
         <div className="px-5 pb-3">
           {r.blocking > 0 ? (
             <Alert variant="destructive">
@@ -94,7 +106,7 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
           ) : <SuccessBox>Aucun problème Oxlint sur les lignes ajoutées : la PR passe.</SuccessBox>}
         </div>
       )}
-      {r.metrics.length > 0 && (
+      {!pending && r.metrics.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 px-5 pb-3">
           {r.blocking != null && <span className="text-xs text-muted-foreground">Indicatif, ne bloque pas :</span>}
           {r.metrics.map((m) => <Badge key={m.label} tone={m.value > 0 && r.blocking == null ? 'amber' : 'gray'}>{m.label} : {m.value}</Badge>)}
@@ -102,12 +114,23 @@ function ReportCard({ report: r, project, wtId, mine }: { report: CheckReport; p
       )}
       <details className="group border-t">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-2.5 text-sm text-muted-foreground [&::-webkit-details-marker]:hidden">
-          <ChevronRightIcon className="size-3.5 transition-transform group-open:rotate-90" />Rapport complet{r.command && <span className="font-mono text-xs">· détail en local : {r.command}</span>}
+          <ChevronRightIcon className="size-3.5 transition-transform group-open:rotate-90" />{pending ? 'Rapport du commit précédent' : 'Rapport complet'}{r.command && <span className="font-mono text-xs">· détail en local : {r.command}</span>}
         </summary>
         <pre className="max-h-96 overflow-auto px-5 pb-4 font-mono text-xs whitespace-pre-wrap">{r.body}</pre>
       </details>
-      {(analysis.id || fix.id) && (
+      {(analysis.id || fix.id) && hideAnalysis && (
+        <div className="flex flex-wrap items-center gap-2 border-t px-5 py-3 text-sm text-muted-foreground">
+          <span className="min-w-0 flex-1">
+            {pending
+              ? 'L’analyse précédente est masquée : elle portait sur le rapport d’avant.'
+              : `L’analyse du ${new Date(analysedAt!).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} portait sur une version précédente du rapport, mis à jour depuis. Ré-analyse pour voir ce qui reste.`}
+          </span>
+          {!pending && <Button variant="ghost" size="sm" onClick={() => setShowOld(true)}>Afficher quand même</Button>}
+        </div>
+      )}
+      {(analysis.id || fix.id) && !hideAnalysis && (
         <div className="flex flex-col gap-3 border-t px-5 py-4">
+          {outdated && <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">Analyse d’une version précédente du rapport : ces problèmes ne sont peut-être plus d’actualité.</p>}
           <RunPanel id={analysis.id} events={analysis.events} running={analysis.running} run={analysis.run} label={r.command ? `Rapport détaillé (${r.command}), puis tri` : 'Tri des problèmes signalés'} onStop={analysis.stop} action={analysis} />
           {out && (
             <>

@@ -1,4 +1,4 @@
-import { CheckCheckIcon, CheckIcon, ChevronRightIcon, FileIcon, Link2Icon, PlayIcon, SparklesIcon, WrenchIcon } from 'lucide-react'
+import { CheckCheckIcon, CheckIcon, ChevronRightIcon, FileIcon, LayersIcon, Link2Icon, PlayIcon, SparklesIcon, WrenchIcon, XIcon } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import type { GeneralComment, CommentAudit, CommentReplyOutput, CommentsFixAllOutput, CommentsOutput, FixOutput, ReviewThread } from '../../../../shared/types.ts'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -19,6 +19,8 @@ export function CommentsTab({ project, wtId }: TabProps) {
   const general = useGeneralComments(project.id, wtId)
   const analysis = useAction<CommentsOutput>('comments-analyze', { project: project.id, worktree: wtId })
   const fixAll = useAction<CommentsFixAllOutput>('comments-fix-all', { project: project.id, worktree: wtId, ref: 'fix-all' })
+  // Pile : ce que j'ai validé commentaire par commentaire, avec mes exigences, traité ensuite en une fois.
+  const pile = usePile(project.id, wtId, (q.data ?? []).filter((t) => !t.isResolved && !t.awaitingReviewer).map((t) => t.id))
 
   if (q.isLoading) return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />Chargement des commentaires…</div>
   if (!q.data) return <ErrorBox error={q.error} />
@@ -31,6 +33,10 @@ export function CommentsTab({ project, wtId }: TabProps) {
   const toFix = acceptable.filter((a) => a.verdict === 'fix').length
   // PR liée : les corrections qui touchent aussi l'autre dépôt, regroupées en tête pour ne rien casser de l'autre côté.
   const crossRepo = open.map((t) => ({ t, a: audits.get(t.id) })).filter((x) => x.a?.verdict === 'fix' && x.a.linkedImpact?.trim())
+  const runPile = async () => {
+    const id = await fixAll.start({ previousRunId: analysis.id, items: pile.items.map((i) => ({ threadId: i.threadId, verdict: i.verdict, action: i.verdict === 'fix' ? pileAction(i) : undefined, reply: i.reply })) })
+    if (id) pile.clear()
+  }
   const acceptAll = () => {
     const parts = [toFix && `${toFix} correction(s) par un seul agent, en un commit`, acceptable.length - toFix && `${acceptable.length - toFix} réponse(s) sans correction`].filter(Boolean).join(' et ')
     if (!confirm(`Tout accepter : ${parts} ?`)) return
@@ -73,10 +79,12 @@ export function CommentsTab({ project, wtId }: TabProps) {
         </div>
       )}
       {fixAll.id && <RunPanel id={fixAll.id} events={fixAll.events} running={fixAll.running} run={fixAll.run} label="Tout accepter : réponses, puis un agent pour toutes les corrections" onStop={fixAll.stop} action={fixAll} defaultOpen />}
+      {fixAll.result && !fixAll.busy && <FixAllRecap results={fixAll.result.results} threads={q.data} />}
       <BlockedCommit run={fixAll.run} />
 
       {open.length === 0 && <SuccessBox><span className="font-medium">Aucun commentaire à traiter sur cette PR.</span></SuccessBox>}
-      {open.map((t) => <ThreadCard key={t.id} thread={t} audit={audits.get(t.id)} project={project.id} wtId={wtId} />)}
+      {open.map((t) => <ThreadCard key={t.id} thread={t} audit={audits.get(t.id)} project={project.id} wtId={wtId} queued={pile.get(t.id)} onQueue={pile.add} onNote={(note) => pile.note(t.id, note)} onUnqueue={() => pile.remove(t.id)} />)}
+      {pile.items.length > 0 && <PileBar items={pile.items} threads={open} busy={fixAll.busy} onRun={() => void runPile()} onRemove={pile.remove} onClear={pile.clear} />}
 
       {awaiting.length > 0 && (
         <Fold title={`Répondu, en attente du reviewer · ${awaiting.length}`}>
@@ -178,6 +186,118 @@ function GeneralFix({ comment, project, wtId }: { comment: GeneralComment; proje
   )
 }
 
+/** Récapitulatif du dernier traitement groupé : pour chaque commentaire, ce qui a été fait, ou pourquoi ça n'a pas abouti. */
+function FixAllRecap({ results, threads }: { results: CommentsFixAllOutput['results']; threads: ReviewThread[] }) {
+  const ok = results.filter((r) => r.ok).length
+  const failed = results.length - ok
+  // Les échecs d'abord : c'est ce qui reste à reprendre.
+  const sorted = [...results].sort((a, b) => Number(a.ok) - Number(b.ok))
+  return (
+    <details open className="group overflow-hidden rounded-xl border bg-card">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+        <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
+        Récapitulatif · {plural(ok, 'commentaire traité', 'commentaires traités')}
+        {failed > 0 && <Badge tone="red">{plural(failed, 'échec', 'échecs')}</Badge>}
+      </summary>
+      <ul className="flex flex-col border-t">
+        {sorted.map((r) => {
+          const t = threads.find((x) => x.id === r.threadId)
+          return (
+            <li key={r.threadId} className="flex flex-col gap-1 border-b px-4 py-2.5 text-sm last:border-b-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={!r.ok ? 'red' : r.verdict === 'fix' ? 'green' : 'gray'}>{!r.ok ? 'Échec' : r.verdict === 'fix' ? 'Corrigé' : 'Répondu'}</Badge>
+                <span className="min-w-0 font-mono text-xs break-all text-muted-foreground">{t ? `${t.path}${t.line ? `:${t.line}` : ''}` : 'Fil introuvable'}</span>
+              </div>
+              {t?.comments[0] && <p className="text-muted-foreground"><span className="font-medium">{t.comments[0].author} :</span> {plain(t.comments[0].body, 160)}</p>}
+              <p className={r.ok ? undefined : 'text-destructive'}>{r.detail}</p>
+            </li>
+          )
+        })}
+      </ul>
+    </details>
+  )
+}
+
+/** Un commentaire validé, en attente dans la pile : ce qui sera fait, et mes exigences en plus pour ce commentaire. */
+interface PileItem {
+  threadId: string
+  verdict: 'fix' | 'skip'
+  /** Ce qui a été validé, affiché dans la pile (ex. « Correction proposée par l’analyse »). */
+  how: string
+  /** Correction : la consigne donnée à l'agent. */
+  action?: string
+  /** Sans correction : la réponse postée. */
+  reply?: string
+  /** Mes exigences en plus pour ce commentaire, ajoutées à la consigne. */
+  note?: string
+}
+
+/** Consigne finale d'une correction de la pile : ce qui a été validé, puis mes exigences. */
+const pileAction = (i: PileItem) =>
+  [i.action ?? 'apply the comment', i.note?.trim() ? `The user's additional requirements for this comment, which win over the rest: ${i.note.trim()}` : ''].filter(Boolean).join('\n\n')
+
+/** Pile du worktree, gardée dans ce navigateur. Les fils qui ne sont plus à traiter en sortent d'eux-mêmes. */
+function usePile(project: string, wtId: string, openIds: string[]) {
+  const key = `shipyard:comment-pile:${project}:${wtId}`
+  const [items, setItems] = useState<PileItem[]>(() => {
+    try {
+      const v: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
+      return Array.isArray(v) ? (v as PileItem[]) : []
+    } catch {
+      return []
+    }
+  })
+  const save = (next: PileItem[]) => {
+    setItems(next)
+    try { localStorage.setItem(key, JSON.stringify(next)) } catch { /* stockage indisponible */ }
+  }
+  const shown = items.filter((i) => openIds.includes(i.threadId))
+  return {
+    items: shown,
+    get: (id: string) => shown.find((i) => i.threadId === id),
+    add: (item: PileItem) => save([...items.filter((i) => i.threadId !== item.threadId), item]),
+    note: (id: string, note: string) => save(items.map((i) => (i.threadId === id ? { ...i, note } : i))),
+    remove: (id: string) => save(items.filter((i) => i.threadId !== id)),
+    clear: () => save([]),
+  }
+}
+
+/** La pile, en bas de la liste et toujours visible : ce qui attend, puis un seul agent et un seul commit pour toutes les corrections. */
+function PileBar({ items, threads, busy, onRun, onRemove, onClear }: { items: PileItem[]; threads: ReviewThread[]; busy: boolean; onRun: () => void; onRemove: (id: string) => void; onClear: () => void }) {
+  const fixes = items.filter((i) => i.verdict === 'fix').length
+  const replies = items.length - fixes
+  const summary = [fixes && `${plural(fixes, 'correction', 'corrections')} par un seul agent, en un commit`, replies && `${plural(replies, 'réponse', 'réponses')} sans correction`].filter(Boolean).join(' · ')
+  return (
+    <div className="sticky bottom-[88px] z-20 flex flex-col gap-3 rounded-xl border border-primary/50 bg-card p-4 shadow-lg">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 font-semibold"><LayersIcon className="size-4" />Pile · {plural(items.length, 'commentaire validé', 'commentaires validés')}</p>
+          <p className="text-sm text-muted-foreground">{summary}. Rien n’est lancé tant que tu n’as pas traité la pile.</p>
+        </div>
+        <span className="flex flex-wrap gap-2">
+          <Button size="sm" disabled={busy} onClick={onRun}>{busy ? <Spinner /> : <PlayIcon />}Traiter la pile ({items.length})</Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={onClear}>Vider</Button>
+        </span>
+      </div>
+      <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto text-sm">
+        {items.map((i) => {
+          const t = threads.find((x) => x.id === i.threadId)
+          return (
+            <li key={i.threadId} className="flex items-start gap-2 border-t pt-1.5">
+              <div className="min-w-0 flex-1">
+                <span className="font-mono text-xs break-all text-muted-foreground">{t?.path}{t?.line ? `:${t.line}` : ''}</span>
+                <span className="ml-2">{i.how}</span>
+                {i.note?.trim() && <p className="text-xs text-muted-foreground">Exigence : {i.note.trim()}</p>}
+              </div>
+              <Button size="icon-sm" variant="ghost" className="size-6 shrink-0" aria-label="Retirer de la pile" onClick={() => onRemove(i.threadId)}><XIcon /></Button>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 function isIgnored(id: string) {
   try {
     return localStorage.getItem(ignoredKey(id)) === '1'
@@ -194,13 +314,20 @@ const APPLY_SUGGESTION = (code: string) =>
 const AS_ASKED = (author: string | undefined) =>
   `Do exactly what ${author ?? 'the reviewer'} asks in their comment, as they worded it, even if the audit judged it unnecessary or suggested something else: the user has decided. If the request is ambiguous, pick the most literal interpretation.`
 
-function ThreadCard({ thread, audit, project, wtId }: { thread: ReviewThread; audit?: CommentAudit; project: string; wtId: string }) {
+function ThreadCard({ thread, audit, project, wtId, queued, onQueue, onNote, onUnqueue }: {
+  thread: ReviewThread
+  audit?: CommentAudit
+  project: string
+  wtId: string
+  /** Ce commentaire est dans la pile : ce qui a été validé. */
+  queued?: PileItem
+  onQueue: (item: PileItem) => void
+  onNote: (note: string) => void
+  onUnqueue: () => void
+}) {
   const fix = useAction<FixOutput>('comment-fix', { project, worktree: wtId, ref: thread.id }, { threadId: thread.id })
-  const replyThread = useReplyThread(project, wtId)
   const dismiss = useDismissInbox()
-  const toast = useToast()
   const [reply, setReply] = useState<string | null>(null)
-  const posting = replyThread.isPending
   const [ignored, setIgnored] = useState(() => isIgnored(thread.id))
   const setIgnoredStored = (v: boolean) => {
     setIgnored(v)
@@ -217,19 +344,17 @@ function ThreadCard({ thread, audit, project, wtId }: { thread: ReviewThread; au
   // Correction faite mais commit refusé par un hook : elle attend une solution (voir BlockedCommit), pas une nouvelle correction.
   const blocked = !!fix.run?.blockedCommit && !fix.run.blockedCommit.resolvedBy
 
-  const postReply = () => replyThread.mutate({ threadId: thread.id, body: reply ?? audit?.reply ?? '', resolve: true }, {
-    onSuccess: () => {
-      toast('Réponse postée et fil résolu')
-      if (fix.id) dismiss.mutate(fix.id)
-    },
-    onError: (e) => toast(e.message, true),
-  })
+  // Valider met dans la pile : rien ne part avant « Traiter la pile ».
+  const queueFix = (how: string, action: string) => { setRefusing(false); onQueue({ threadId: thread.id, verdict: 'fix', how, action }) }
+  const queueReply = () => onQueue({ threadId: thread.id, verdict: 'skip', how: 'Réponse sans correction', reply: reply ?? audit?.reply ?? '' })
+  const active = !done && !ignored && !fix.busy && !blocked && !queued
 
   let state: [string, 'amber' | 'green' | 'gray' | 'blue'] = ['À traiter', 'amber']
   if (fix.running) state = ['Correction en cours', 'blue']
   if (done) state = ['Corrigé · DONE posté', 'green']
   if (blocked) state = ['Commit refusé · solution à valider', 'amber']
   if (ignored) state = ['Ignoré', 'gray']
+  if (queued) state = ['Dans la pile', 'blue']
 
   return (
     <article className="overflow-hidden rounded-xl border bg-card">
@@ -254,29 +379,30 @@ function ThreadCard({ thread, audit, project, wtId }: { thread: ReviewThread; au
         </div>
       </div>
       {/* Sans analyse : les actions se font fil par fil, directement. */}
-      {!audit && !done && !ignored && !fix.busy && !blocked && (
+      {!audit && active && (
         <div className="flex flex-wrap gap-2 border-t bg-muted/30 px-4 py-2.5">
           {suggestion && (
-            <Button size="sm" variant="outline" title="Remplace les lignes commentées par la suggestion, puis commite, pousse et répond DONE" onClick={() => fix.start({ action: APPLY_SUGGESTION(suggestion) })}>
+            <Button size="sm" variant="outline" title="Met dans la pile : remplacer les lignes commentées par la suggestion" onClick={() => queueFix('Suggestion du reviewer, telle quelle', APPLY_SUGGESTION(suggestion))}>
               <CheckIcon />Appliquer la suggestion
             </Button>
           )}
-          <Button size="sm" variant={suggestion ? 'ghost' : 'outline'} title="Fait ce que demande le reviewer, puis commite, pousse et répond DONE" onClick={() => fix.start({ action: AS_ASKED(first?.author) })}>
+          <Button size="sm" variant={suggestion ? 'ghost' : 'outline'} title="Met dans la pile : faire ce que demande le reviewer" onClick={() => queueFix('Ce que demande le reviewer', AS_ASKED(first?.author))}>
             <WrenchIcon />Corriger avec l’IA
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setRefusing(!refusing)}>Répondre…</Button>
           <Button size="sm" variant="ghost" onClick={() => setIgnoredStored(true)}>Ignorer</Button>
         </div>
       )}
-      {!audit && refusing && !done && !ignored && !fix.busy && (
+      {!audit && refusing && active && (
         <div className="border-t px-4 py-3">
           <RefusePanel thread={thread} project={project} wtId={wtId} initialMode="reply"
-            onFix={(instruction) => { setRefusing(false); void fix.start({ action: instruction }) }}
+            onFix={(instruction) => queueFix('Ta consigne', instruction)}
             onReplied={() => { setRefusing(false); if (fix.id) dismiss.mutate(fix.id) }}
             onIgnore={() => { setRefusing(false); setIgnoredStored(true) }}
             onCancel={() => setRefusing(false)} />
         </div>
       )}
+      {!audit && queued && <div className="border-t px-4 py-3"><QueuedNote item={queued} onNote={onNote} onUnqueue={onUnqueue} /></div>}
       {!audit && (fix.id || ignored) && (
         <div className="flex flex-col gap-2 border-t px-4 py-3">
           {ignored && <Button variant="link" size="sm" className="h-7 self-start px-0" onClick={() => setIgnoredStored(false)}>Annuler « Ignorer »</Button>}
@@ -302,21 +428,22 @@ function ThreadCard({ thread, audit, project, wtId }: { thread: ReviewThread; au
               <Textarea id={`r-${thread.id}`} rows={3} className="bg-background" value={reply ?? audit.reply} onChange={(e) => setReply(e.target.value)} />
             </div>
           )}
-          {audit.verdict === 'fix' && <p className="text-xs text-muted-foreground">Une fois corrigé, Shipyard commite, pousse, répond « DONE » avec le lien du commit et résout le fil.</p>}
-          {!done && !ignored && !fix.busy && !blocked && (
+          {audit.verdict === 'fix' && <p className="text-xs text-muted-foreground">Accepter met le commentaire dans la pile. Quand tu la traites, un seul agent fait toutes les corrections, puis Shipyard commite, pousse, répond « DONE » avec le lien du commit et résout chaque fil.</p>}
+          {active && (
             <div className="flex flex-wrap gap-2">
               {audit.verdict === 'fix'
-                ? <Button size="sm" onClick={() => fix.start({ action: audit.action })}>Accepter : corriger et répondre DONE</Button>
-                : <Button size="sm" disabled={posting} onClick={postReply}>{posting && <Spinner />}Accepter : répondre sans corriger</Button>}
-              <Button variant="outline" size="sm" title="Fait ce que demande le reviewer, puis commite, pousse et répond DONE" onClick={() => fix.start({ action: AS_ASKED(first?.author) })}>
+                ? <Button size="sm" onClick={() => queueFix('Correction proposée par l’analyse', audit.action)}><LayersIcon />Accepter : mettre dans la pile</Button>
+                : <Button size="sm" onClick={queueReply}><LayersIcon />Accepter : répondre sans corriger</Button>}
+              <Button variant="outline" size="sm" title="Met dans la pile : faire ce que demande le reviewer, tel qu’il l’a écrit" onClick={() => queueFix('Ce que demande le reviewer', AS_ASKED(first?.author))}>
                 <WrenchIcon />{audit.verdict === 'fix' ? 'Faire ce que demande le reviewer' : 'Corriger quand même'}
               </Button>
               <Button variant="outline" size="sm" onClick={() => setRefusing(!refusing)}>Refuser…</Button>
             </div>
           )}
-          {refusing && !done && !ignored && !fix.busy && (
+          {queued && <QueuedNote item={queued} onNote={onNote} onUnqueue={onUnqueue} />}
+          {refusing && active && (
             <RefusePanel thread={thread} project={project} wtId={wtId}
-              onFix={(instruction) => { setRefusing(false); void fix.start({ action: instruction }) }}
+              onFix={(instruction) => queueFix('Ta consigne', instruction)}
               onReplied={() => { setRefusing(false); if (fix.id) dismiss.mutate(fix.id) }}
               onIgnore={() => { setRefusing(false); setIgnoredStored(true) }}
               onCancel={() => setRefusing(false)} />
@@ -327,6 +454,24 @@ function ThreadCard({ thread, audit, project, wtId }: { thread: ReviewThread; au
         </div>
       )}
     </article>
+  )
+}
+
+/** Commentaire dans la pile : ce qui a été validé, et mes exigences en plus pour celui-ci, données à l'agent avec la correction. */
+function QueuedNote({ item, onNote, onUnqueue }: { item: PileItem; onNote: (note: string) => void; onUnqueue: () => void }) {
+  const id = `pile-note-${item.threadId}`
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-primary/40 bg-background p-3">
+      <p className="flex flex-wrap items-center gap-2 text-sm"><LayersIcon className="size-4 text-muted-foreground" /><span className="font-medium">Dans la pile :</span> {item.how}</p>
+      {item.verdict === 'fix' ? (
+        <>
+          <FieldLabel htmlFor={id}>Tes exigences pour ce commentaire <span className="font-normal text-muted-foreground">(facultatif)</span></FieldLabel>
+          <Textarea id={id} rows={2} value={item.note ?? ''} onChange={(e) => onNote(e.target.value)}
+            placeholder="Ex. : sans toucher au composant parent · réutilise le helper existant · ajoute le test du cas vide." />
+        </>
+      ) : <p className="text-sm text-muted-foreground whitespace-pre-line">{item.reply}</p>}
+      <div><Button size="sm" variant="ghost" onClick={onUnqueue}>Retirer de la pile</Button></div>
+    </div>
   )
 }
 
@@ -377,8 +522,8 @@ function RefusePanel({ thread, project, wtId, initialMode = 'fix', onFix, onRepl
           <FieldLabel htmlFor={`${id}-fix`}>Ce que l’IA doit corriger</FieldLabel>
           <Textarea id={`${id}-fix`} rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)}
             placeholder="Ex. : garde le composant tel quel, mais renomme la prop en `onDone` · corrige seulement le cas vide, pas le reste." />
-          <p className="text-xs text-muted-foreground">Shipyard commite, pousse, répond « DONE » avec le lien du commit et résout le fil.</p>
-          <div><Button size="sm" disabled={!instruction.trim()} onClick={() => onFix(instruction.trim())}>Corriger et répondre DONE</Button></div>
+          <p className="text-xs text-muted-foreground">Le commentaire part dans la pile avec cette consigne : il est corrigé avec les autres quand tu la traites.</p>
+          <div><Button size="sm" disabled={!instruction.trim()} onClick={() => onFix(instruction.trim())}><LayersIcon />Mettre dans la pile</Button></div>
         </div>
       ) : (
         <div className="flex flex-col gap-2">

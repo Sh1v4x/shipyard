@@ -1,11 +1,12 @@
-import { LinkIcon, PencilIcon } from 'lucide-react'
+import { LinkIcon, PencilIcon, PlusIcon } from 'lucide-react'
 import { useState } from 'react'
 import type { Project, Ticket, Worktree } from '../../../shared/types.ts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
-import { useLinkTicket } from '../data/mutations.ts'
+import { coversTicket, worktreeTicketIds } from '../../../shared/text.ts'
+import { useAddTicket, useLinkTicket } from '../data/mutations.ts'
 import { useProjectOverview } from '../data/queries.ts'
 import { Dot, Spinner, ticketDot, useToast, worktreeTitle } from '../ui.tsx'
 
@@ -14,36 +15,42 @@ const TICKET_ID = /^[A-Z][A-Z0-9]*-\d+$/i
 /**
  * Lie un ticket Linear à un worktree dont la branche ne le nomme pas (ou en change).
  * Le lien est gardé par Shipyard ; « Délier » revient au ticket déduit de la branche.
+ * `add` : associe un ticket de plus au worktree (deux tickets liés, faits dans la même branche et la même PR), sans
+ * toucher au ticket principal.
  */
-export function LinkTicket({ project, worktree, hasTicket }: { project: Project; worktree: Worktree; hasTicket: boolean }) {
+export function LinkTicket({ project, worktree, hasTicket, add = false }: { project: Project; worktree: Worktree; hasTicket: boolean; add?: boolean }) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const ov = useProjectOverview(project.id)
-  const link = useLinkTicket(project.id)
+  const replace = useLinkTicket(project.id)
+  const append = useAddTicket(project.id)
+  const link = add ? append : replace
   const toast = useToast()
 
   const q = filter.trim().toLowerCase()
   const tickets = (ov.data?.tickets ?? [])
     .filter((t) => t.statusType !== 'canceled' && (!q || t.id.toLowerCase().includes(q) || t.title.toLowerCase().includes(q)))
     .slice(0, 30)
-  const usedBy = (id: string) => ov.data?.worktrees.find((w) => w.ticketId === id && w.id !== worktree.id)
+  const usedBy = (id: string) => ov.data?.worktrees.find((w) => coversTicket(w, id) && w.id !== worktree.id)
   // Un identifiant tapé à la main (ticket hors de la liste : assigné à quelqu'un d'autre, ancien…).
   const typed = TICKET_ID.test(filter.trim()) && !tickets.some((t) => t.id.toLowerCase() === q) ? filter.trim().toUpperCase() : null
 
-  const pick = (ticketId: string | null) =>
-    link.mutate({ wt: worktree.id, ticketId }, {
-      onSuccess: () => {
-        setOpen(false)
-        setFilter('')
-        toast(ticketId ? `Worktree lié à ${ticketId}` : 'Lien retiré : ticket déduit de la branche')
-      },
-      onError: (e) => toast(e.message, true),
-    })
+  const done = (message: string) => {
+    setOpen(false)
+    setFilter('')
+    toast(message)
+  }
+  const pick = (ticketId: string | null) => {
+    if (add && ticketId) return append.mutate({ wt: worktree.id, ticketId }, { onSuccess: () => done(`${ticketId} associé à ce worktree`), onError: (e) => toast(e.message, true) })
+    replace.mutate({ wt: worktree.id, ticketId }, { onSuccess: () => done(ticketId ? `Worktree lié à ${ticketId}` : 'Lien retiré : ticket déduit de la branche'), onError: (e) => toast(e.message, true) })
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        {hasTicket
+        {add
+          ? <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs text-muted-foreground" title="Un autre ticket fait dans ce même worktree et sa PR"><PlusIcon className="size-3" />Ticket</Button>
+          : hasTicket
           ? <Button variant="ghost" size="icon-sm" className="size-6" aria-label="Changer le ticket lié"><PencilIcon className="size-3" /></Button>
           : <Button variant="outline" size="sm" className="h-6 px-2 text-xs"><LinkIcon className="size-3" />Lier un ticket</Button>}
       </PopoverTrigger>
@@ -54,12 +61,12 @@ export function LinkTicket({ project, worktree, hasTicket }: { project: Project;
         <div className="mt-2 flex max-h-72 flex-col overflow-y-auto">
           {typed && (
             <button type="button" disabled={link.isPending} onClick={() => pick(typed)} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent">
-              <LinkIcon className="size-3.5 text-muted-foreground" />Lier <span className="font-mono">{typed}</span>
+              <LinkIcon className="size-3.5 text-muted-foreground" />{add ? 'Associer' : 'Lier'} <span className="font-mono">{typed}</span>
             </button>
           )}
           {tickets.map((t) => {
             const other = usedBy(t.id)
-            const current = t.id === worktree.ticketId
+            const current = add ? coversTicket(worktree, t.id) : t.id === worktree.ticketId
             return (
               <button
                 key={t.id}
@@ -79,10 +86,10 @@ export function LinkTicket({ project, worktree, hasTicket }: { project: Project;
           })}
           {!tickets.length && !typed && <p className="px-2 py-3 text-sm text-muted-foreground">{ov.isLoading ? 'Chargement des tickets…' : 'Aucun ticket : tape son identifiant.'}</p>}
         </div>
-        {(worktree.ticketLinked || link.isPending) && (
+        {((worktree.ticketLinked && !add) || link.isPending) && (
           <div className="mt-2 flex items-center justify-between border-t pt-2">
             {link.isPending ? <span className="flex items-center gap-2 text-xs text-muted-foreground"><Spinner className="size-3" />Enregistrement…</span> : <span />}
-            {worktree.ticketLinked && <Button variant="ghost" size="sm" disabled={link.isPending} onClick={() => pick(null)}>Délier</Button>}
+            {worktree.ticketLinked && !add && <Button variant="ghost" size="sm" disabled={link.isPending} onClick={() => pick(null)}>Délier</Button>}
           </div>
         )}
       </PopoverContent>
@@ -98,7 +105,7 @@ export function LinkWorktree({ project, ticket }: { project: Project; ticket: Ti
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const ov = useProjectOverview(project.id)
-  const link = useLinkTicket(project.id)
+  const link = useAddTicket(project.id)
   const toast = useToast()
 
   const q = filter.trim().toLowerCase()
@@ -112,7 +119,7 @@ export function LinkWorktree({ project, ticket }: { project: Project; ticket: Ti
       onSuccess: () => {
         setOpen(false)
         setFilter('')
-        toast(`${ticket.id} lié à ${w.branch ?? 'ce worktree'}`)
+        toast(w.ticketId ? `${ticket.id} associé à ${w.ticketId} dans ${w.branch ?? 'ce worktree'}` : `${ticket.id} lié à ${w.branch ?? 'ce worktree'}`)
       },
       onError: (e) => toast(e.message, true),
     })
@@ -138,7 +145,7 @@ export function LinkWorktree({ project, ticket }: { project: Project; ticket: Ti
                 <span className={cn('truncate text-sm', !(w.kind === 'review' && pr) && 'font-mono text-xs')}>{worktreeTitle(w, pr)}</span>
                 <span className="text-xs text-muted-foreground">
                   {pr ? `#${pr.number}` : 'Pas de PR'}
-                  {w.ticketId ? ` · déjà lié à ${w.ticketId}` : ' · sans ticket'}
+                  {w.ticketId ? ` · s’ajoute à ${worktreeTicketIds(w).join(', ')}` : ' · sans ticket'}
                 </span>
               </button>
             )

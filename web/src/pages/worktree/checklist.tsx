@@ -3,7 +3,7 @@ import type { CheckReport, LabelRules, PullRequest, ReviewThread, SdkStatus, Tes
 import { awaitsReview, needsReviewer, needsTesting, reviewersToRerequest } from '../../../../shared/review.ts'
 import { plural } from '../../../../shared/text.ts'
 import { cn } from '@/lib/utils'
-import { useChecks, useHealth, useLabelRules, useSdkStatus, useThreads, useWorktreeDetail } from '../../data/queries.ts'
+import { useChecks, useHealth, useLabelRules, useProjectOverview, useSdkStatus, useThreads, useWorktreeDetail } from '../../data/queries.ts'
 import { href } from '../../router.ts'
 
 // Liste « Prête à merger » d'un worktree : calculée ici pour la page du worktree et pour la barre latérale
@@ -16,7 +16,7 @@ export const lateSdks = (list: SdkStatus[] | undefined) => (list ?? []).filter((
 export const myOpenThreads = (threads: ReviewThread[] | undefined) => (threads ?? []).filter((t) => t.byMe && !t.isDraft && !t.isResolved)
 
 export type SectionState = 'ok' | 'ko' | 'warn' | 'run' | 'wait' | 'none'
-export interface Section { key: string; label: string; state: SectionState; summary: string; group: 'status' | 'work' }
+export interface Section { key: string; label: string; state: SectionState; summary: string; group: 'status' | 'work' | 'tools' }
 
 export const STATE_ICON: Record<SectionState, { icon: LucideIcon; className: string }> = {
   ok: { icon: CheckIcon, className: 'bg-emerald-500 text-white' },
@@ -36,7 +36,24 @@ export interface PrState {
   sdk: SdkStatus[] | undefined
   rules: LabelRules
   me: string | null
+  /**
+   * La review de cette PR m'est demandée, d'après la vue du projet (label « review demandée » du dépôt compris).
+   * Inconnu tant que la vue n'est pas chargée : on se rabat alors sur les reviewers de GitHub.
+   */
+  reviewAsked?: boolean
+  /** Une clé Postman est réglée (sinon l'outil Postman s'affiche « à connecter »). */
+  postman?: boolean
 }
+
+/**
+ * Un job GitHub Actions tourne encore sur le dernier commit : c'est lui qui peut réécrire un rapport de contrôle.
+ * Un check externe en attente (CodeRabbit…) ne compte pas : il n'écrit aucun rapport, et peut rester en attente longtemps.
+ */
+export const actionsRunning = (pr: PullRequest) => pr.ci.jobs.some((j) => !!j.jobId && (j.state === 'running' || j.state === 'pending'))
+
+/** La review de cette PR est-elle à faire par moi maintenant ? */
+export const reviewToDo = ({ d, rules, me, reviewAsked }: PrState) =>
+  !!d.pr && (reviewAsked ?? (awaitsReview(d.pr, rules) || (!!me && d.pr.requestedReviewers.includes(me))))
 
 /** Points de la liste de contrôle (status) et sections de travail (work) du worktree, avec leur état. */
 const manualDone = (t: TestsSummary) => !!t.manual && t.manual.done === t.manual.total
@@ -93,9 +110,12 @@ export function buildSections(state: PrState): Section[] {
   const late = lateSdks(sdk)
   const sdkState: Section = { key: 'sdk', label: 'SDK', group: 'status', ...(!sdk ? { state: 'wait', summary: '…' } : late.length ? { state: 'warn', summary: late[0].latest && late[0].locked !== late[0].latest ? `${late[0].locked} → ${late[0].latest}` : 'à publier' } : { state: 'ok', summary: sdk.length ? 'à jour' : 'aucun' }) }
   const fresh = (checks ?? []).filter((r) => !r.stale)
+  // Un rapport en retard sur le dernier commit n'est « en cours » que si la CI tourne encore : sinon c'est un commentaire
+  // qui ne suit pas les commits (le lien posé par Linear, par exemple), et il n'y a rien à attendre.
+  const pendingChecks = fresh.length < (checks?.length ?? 0) && !!pr && actionsRunning(pr)
   const checksState: Section = {
     key: 'checks', label: 'Contrôles', group: 'status',
-    ...(!checks ? { state: 'wait', summary: '…' } : !checks.length ? { state: 'ok', summary: 'aucun' } : fresh.some((r) => r.status === 'fail') ? { state: 'ko', summary: plural(fresh.filter((r) => r.status === 'fail').length, 'échec', 'échecs') } : fresh.some((r) => r.status === 'warn') ? { state: 'warn', summary: 'à regarder' } : fresh.length < checks.length ? { state: 'run', summary: 'en retard' } : { state: 'ok', summary: 'rien à signaler' }),
+    ...(!checks ? { state: 'wait', summary: '…' } : !checks.length ? { state: 'ok', summary: 'aucun' } : fresh.some((r) => r.status === 'fail') ? { state: 'ko', summary: plural(fresh.filter((r) => r.status === 'fail').length, 'échec', 'échecs') } : fresh.some((r) => r.status === 'warn') ? { state: 'warn', summary: 'à regarder' } : pendingChecks ? { state: 'run', summary: 'nouveau passage' } : { state: 'ok', summary: 'rien à signaler' }),
   }
   const ciState = (p: PullRequest): Section => {
     const jobs = p.ci.jobs.filter((j) => j.state !== 'skipped')
@@ -120,7 +140,8 @@ export function buildSections(state: PrState): Section[] {
     const mineThreads = myOpenThreads(threads)
     // La branche de la PR sur GitHub : des correctifs poussés par l'auteur, à récupérer pour relire à jour.
     out.push({ key: 'conflicts', label: 'À jour', group: 'status', ...(d.behindRemote > 0 ? { state: 'warn', summary: plural(d.behindRemote, 'nouveau commit', 'nouveaux commits') } : { state: 'ok', summary: 'à jour' }) })
-    out.push({ key: 'review', label: 'Review', group: 'status', ...(awaitsReview(pr, rules) || pr.requestedReviewers.length ? { state: 'warn', summary: 'à faire' } : { state: 'ok', summary: 'rendue' }) })
+    const asked = state.me ? pr.requestedReviewers.includes(state.me) : pr.requestedReviewers.length > 0
+    out.push({ key: 'review', label: 'Review', group: 'status', ...(reviewToDo(state) ? { state: 'warn', summary: 'à faire' } : asked ? { state: 'wait', summary: 'pas encore prête' } : { state: 'ok', summary: 'rendue' }) })
     if (mineThreads.length || threads?.some((t) => t.byMe && !t.isDraft)) {
       const replies = mineThreads.filter((t) => !t.awaitingReviewer).length
       out.push({ key: 'followup', label: 'Suivi des retours', group: 'status', ...(replies ? { state: 'warn', summary: plural(replies, 'réponse', 'réponses') } : mineThreads.length ? { state: 'wait', summary: `${mineThreads.length} ouverts` } : { state: 'ok', summary: 'tout réglé' }) })
@@ -137,6 +158,8 @@ export function buildSections(state: PrState): Section[] {
   if (pr && !w.merged && w.kind !== 'mine') out.push({ key: 'files', label: 'Fichiers', group: 'work', state: 'none', summary: String(pr.changedFiles) })
   if (!pr) out.push({ key: 'tests', label: 'Tests', group: 'work', state: 'none', summary: '' })
   out.push({ key: 'logs', label: 'Logs', group: 'work', state: 'none', summary: '' })
+  // Outils : connecteurs facultatifs, liés au worktree.
+  if (!w.merged) out.push({ key: 'postman', label: 'Postman', group: 'tools', state: 'none', summary: state.postman === false ? 'à connecter' : '' })
   return out
 }
 
@@ -150,7 +173,8 @@ export function usePrChecklist(project: string, wt: string, enabled = true, poll
   const sdk = useSdkStatus(project, wt, enabled && !!d)
   const rules = useLabelRules()
   const me = useHealth().data?.github ?? null
-  const state: PrState | null = d ? { d, partial: q.isPlaceholderData, threads: threads.data, checks: checks.data, sdk: sdk.data, rules, me } : null
+  const asked = useProjectOverview(project).data?.requestedReviews
+  const state: PrState | null = d ? { d, partial: q.isPlaceholderData, threads: threads.data, checks: checks.data, sdk: sdk.data, rules, me, reviewAsked: asked && d.pr ? asked.includes(d.pr.number) : undefined } : null
   return { state, loading: q.isLoading, status: state ? buildSections(state).filter((s) => s.group === 'status') : [] }
 }
 

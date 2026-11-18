@@ -12,7 +12,7 @@ import { useProjectOverview, useProjects, useRuns } from '../data/queries.ts'
 import { useAction } from '../data/runs.ts'
 import { go, href } from '../router.ts'
 import { Badge, Pill, PromptMenu, RunPanel, SectionLabel, Spinner, useToast } from '../ui.tsx'
-import { slugify, ticketIdFrom } from '../../../shared/text.ts'
+import { coversTicket, slugify, ticketIdsFrom } from '../../../shared/text.ts'
 import { PlanBody } from './worktree/TicketAgent.tsx'
 
 const VERDICT = {
@@ -34,14 +34,16 @@ export function PrecheckPage({ project, ticket }: { project: Project; ticket?: s
   const overview = useProjectOverview(project.id)
   const [source, setSource] = useState(ticket ?? '')
   const [extra, setExtra] = useState('')
-  const typed = ticketIdFrom(source)
+  // Plusieurs tickets liés se font ensemble : le premier donne son nom à la branche, les autres s'y associent.
+  const [typed, ...typedExtra] = ticketIdsFrom(source)
   const info = overview.data?.tickets.find((t) => t.id === ticket)
+  const together = check.run?.input?.extraTickets ?? []
   // Un pre-check par ticket : les précédents restent ouvrables.
   const others = [...new Set((recent.data ?? []).map((r) => r.scope.ref).filter((r): r is string => !!r && r !== ticket))].slice(0, 8)
 
   const launch = async () => {
     if (!typed) return
-    const id = await check.start({ ref: typed, ticketId: typed, extra: extra.trim() })
+    const id = await check.start({ ref: typed, ticketId: typed, extraTickets: typedExtra, extra: extra.trim() })
     if (id && typed !== ticket) go({ page: 'precheck', project: project.id, ticket: typed })
   }
 
@@ -51,7 +53,7 @@ export function PrecheckPage({ project, ticket }: { project: Project; ticket?: s
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold tracking-tight">Pre-check d’un ticket</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Donne un ticket : l’IA le lit, explore le code de {project.name}, vérifie que c’est faisable et estime la charge, en suivant les règles de dev et de review de l’équipe. Tu échanges avec elle, puis tu approuves : la branche et le worktree sont créés et elle se met au travail avec ce qu’elle a appris. Rien n’est créé avant ton accord.
+            Donne un ticket (ou plusieurs tickets liés, à faire ensemble) : l’IA le lit, explore le code de {project.name}, vérifie que c’est faisable et estime la charge, en suivant les règles de dev et de review de l’équipe. Tu échanges avec elle, puis tu approuves : la branche et le worktree sont créés et elle se met au travail avec ce qu’elle a appris. Rien n’est créé avant ton accord.
           </p>
         </div>
         <PromptMenu items={[['precheck', 'Pre-check d’un ticket']]} />
@@ -59,10 +61,11 @@ export function PrecheckPage({ project, ticket }: { project: Project; ticket?: s
 
       <section className="flex flex-col gap-4 rounded-xl border bg-card p-5 shadow-xs">
         <div className="flex flex-col gap-2">
-          <FieldLabel htmlFor="precheck-ticket">Ticket Linear</FieldLabel>
-          <Input id="precheck-ticket" value={source} onChange={(e) => setSource(e.target.value)} placeholder="https://linear.app/equipe/issue/ENG-142/… ou ENG-142"
+          <FieldLabel htmlFor="precheck-ticket" className="flex-wrap">Ticket Linear <span className="font-normal text-muted-foreground">(plusieurs si tu les fais ensemble, dans le même worktree et la même PR)</span></FieldLabel>
+          <Input id="precheck-ticket" value={source} onChange={(e) => setSource(e.target.value)} placeholder="https://linear.app/equipe/issue/ENG-142/… ou ENG-142 · ENG-142 ENG-143 pour deux tickets liés"
             onKeyDown={(e) => { if (e.key === 'Enter' && typed && !check.busy) void launch() }} />
           {source.trim() && !typed && <p className="text-xs text-red-600 dark:text-red-400">Aucun identifiant de ticket dans ce texte (attendu : une URL Linear ou ENG-142).</p>}
+          {typedExtra.length > 0 && <p className="text-xs text-muted-foreground">Un seul pre-check, un seul plan et un seul worktree pour <span className="font-mono">{[typed, ...typedExtra].join(' + ')}</span>. La branche porte <span className="font-mono">{typed}</span>.</p>}
         </div>
         <div className="flex flex-col gap-2">
           <FieldLabel htmlFor="precheck-extra">Consigne <span className="font-normal text-muted-foreground">(facultatif)</span></FieldLabel>
@@ -90,11 +93,12 @@ export function PrecheckPage({ project, ticket }: { project: Project; ticket?: s
             <span className="font-mono text-sm font-medium">{ticket}</span>
             {info && <span className="min-w-0 text-sm">{info.title}</span>}
             {info && <a href={info.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-medium hover:underline">Linear<ExternalLinkIcon className="size-3.5" /></a>}
+            {together.length > 0 && <Badge tone="blue">avec {together.join(', ')}</Badge>}
           </div>
           <RunPanel id={check.id} events={check.events} running={check.running} run={check.run} label="L’IA lit le ticket et explore le code" onStop={check.stop} action={check} />
           {check.result && !check.busy && check.id && (
             <PrecheckResult project={project} ticket={ticket} runId={check.id} out={check.result} note={check.run?.note ?? null} approved={check.run?.decision === 'approved'}
-              worktree={overview.data?.worktrees.find((w) => w.ticketId === ticket)?.id ?? null}
+              worktree={overview.data?.worktrees.find((w) => coversTicket(w, ticket))?.id ?? null}
               onSend={(feedback) => check.start({ ticketId: ticket, feedback, previousRunId: check.id })} />
           )}
         </>
@@ -103,9 +107,11 @@ export function PrecheckPage({ project, ticket }: { project: Project; ticket?: s
   )
 }
 
-function PrecheckResult({ project, ticket, runId, out, note, approved, worktree, onSend }: {
+/** Résultat d'un pre-check, ou plan d'une modification rapide (ticket null) : faisabilité, charge, plan, échange, puis approbation. */
+export function PrecheckResult({ project, ticket, runId, out, note, approved, worktree, onSend }: {
   project: Project
-  ticket: string
+  /** null : modification rapide, sans ticket (la branche ne porte pas d'identifiant). */
+  ticket: string | null
   runId: string
   out: PrecheckOutput
   /** Mon dernier message sur ce pre-check, auquel répond out.reply. */
@@ -126,7 +132,7 @@ function PrecheckResult({ project, ticket, runId, out, note, approved, worktree,
   const repos = [project, ...(projects.data ?? []).filter((p) => p.id !== project.id && !!project.group && p.group === project.group)]
   const proposed = repos.filter((r) => r.id === project.id || out.repos.some((n) => n.toLowerCase() === r.name.toLowerCase())).map((r) => r.id)
   const chosen = picked ?? proposed
-  const branch = branchEdit ?? `${out.type}/${ticket}-${slugify(out.branch)}`
+  const branch = branchEdit ?? `${out.type}/${ticket ? `${ticket}-` : ''}${slugify(out.branch)}`
   const validBranch = /^[\w./-]+$/.test(branch)
 
   const send = async () => {
@@ -197,7 +203,7 @@ function PrecheckResult({ project, ticket, runId, out, note, approved, worktree,
       {approved ? (
         <Alert variant="success">
           <CheckCircle2Icon />
-          <AlertTitle>Pre-check approuvé</AlertTitle>
+          <AlertTitle>{ticket ? 'Pre-check approuvé' : 'Plan approuvé'}</AlertTitle>
           <AlertDescription className="flex flex-col gap-2 text-current">
             Le worktree est créé et le travail a été lancé sur ce plan.
             {worktree && <span><Button size="sm" variant="outline" asChild><a href={href({ page: 'worktree', project: project.id, wt: worktree, tab: 'ticket' })}><GitBranchIcon />Ouvrir le worktree</a></Button></span>}
@@ -234,7 +240,7 @@ function PrecheckResult({ project, ticket, runId, out, note, approved, worktree,
           {out.feasibility.verdict === 'bloqué' && (
             <Alert variant="warning">
               <TriangleAlertIcon />
-              <AlertDescription>L’IA juge le ticket bloqué en l’état. Réponds d’abord à ses questions, ou approuve en connaissance de cause.</AlertDescription>
+              <AlertDescription>L’IA juge {ticket ? 'le ticket bloqué' : 'la demande bloquée'} en l’état. Réponds d’abord à ses questions, ou approuve en connaissance de cause.</AlertDescription>
             </Alert>
           )}
           {out.feasibility.verdict !== 'bloqué' && out.questions.length > 0 && (

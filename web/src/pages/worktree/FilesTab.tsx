@@ -197,6 +197,11 @@ function FindingsBasket({ findings, decisions, decide, fixAll, results, push }: 
       <span className="min-w-0 flex-1"><span className="font-medium">{f.title}</span> <span className="font-mono text-xs text-muted-foreground">{f.file}:{f.line}</span></span>
       {results.get(f.id) && <Badge tone={results.get(f.id)!.ok ? 'green' : 'red'}>{results.get(f.id)!.ok ? 'Corrigé' : results.get(f.id)!.detail}</Badge>}
       {action}
+      {/* Le commentaire et son correctif, comme dans le diff : la liste se lit sans remonter. */}
+      <div className="flex w-full max-w-3xl flex-col gap-1">
+        <p>{f.body}</p>
+        <p className="text-muted-foreground"><span className="font-medium text-foreground">Correctif : </span>{f.fix}</p>
+      </div>
     </div>
   )
   return (

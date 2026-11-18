@@ -3,7 +3,7 @@ import * as gh from '../lib/github.ts'
 import * as svc from '../services.ts'
 import { sendNotification } from '../notifier.ts'
 import { getSettings, saveSettings } from '../lib/settings.ts'
-import { claudeLogin, claudeLogout, getCredentials, setGithubToken, setLinearKey } from '../lib/credentials.ts'
+import { claudeLogin, claudeLogout, getCredentials, setGithubToken, setLinearKey, setPostmanKey } from '../lib/credentials.ts'
 import { Hono } from 'hono'
 import { jsonBody } from '../http.ts'
 import * as inputs from '../inputs.ts'
@@ -36,6 +36,7 @@ settingsRoutes.put('/settings/credentials', async (c) => {
   try {
     if (b.linearKey !== undefined) await setLinearKey(b.linearKey)
     if (b.githubToken !== undefined) await setGithubToken(b.githubToken)
+    if (b.postmanKey !== undefined) await setPostmanKey(b.postmanKey)
   } catch (e) {
     throw new HttpError(400, (e as Error).message)
   }

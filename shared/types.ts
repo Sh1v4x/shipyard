@@ -19,6 +19,8 @@ export interface CreateWorktreeInput {
   branch?: string
   base?: string
   ticketId?: string
+  /** Mode ticket : autres tickets faits dans ce même worktree et sa PR, associés dès la création. */
+  extraTickets?: string[]
   prNumber?: number
 }
 
@@ -55,10 +57,15 @@ export interface Worktree {
   ticketId: string | null
   /** Ticket lié à la main dans Shipyard, au lieu d'être déduit de la branche ou de la PR. */
   ticketLinked?: boolean
+  /**
+   * Autres tickets faits dans ce même worktree et sa PR (tickets liés entre eux, livrés ensemble) : ils comptent
+   * comme le principal dans les prompts, la PR et « Aboutir ».
+   */
+  extraTicketIds?: string[]
   prNumber: number | null
   kind: WorktreeKind
   /** Ma PR de cette branche, mergée : le worktree attend d'être abouti (ticket en Done, worktree supprimé). */
-  /** state CLOSED : PR fermée sans merge (review d'une PR abandonnée). Absent : mergée. */
+  /** state CLOSED : PR fermée sans merge (la mienne, ou celle d'une review abandonnée). Absent : mergée. */
   merged?: { number: number; title: string; url: string; mergedAt: string | null; state?: 'MERGED' | 'CLOSED' } | null
   /** Worktrees d'autres projets du groupe associés à celui-ci (même feature, même review). */
   links?: WorktreeLink[]
@@ -322,6 +329,8 @@ export interface WorktreeDetail {
   project: Project
   worktree: Worktree
   ticket: Ticket | null
+  /** Tickets associés au worktree (worktree.extraTicketIds), lus dans Linear. */
+  extraTickets?: Ticket[]
   pr: PullRequest | null
   commitsAhead: string[]
   dirtyFiles: { status: string; path: string }[]
@@ -557,6 +566,144 @@ export interface ActionsBlock {
   at: string
 }
 
+// ---------- Postman ----------
+
+/** Un espace de travail, une collection ou un dossier Postman, tel qu'on le choisit dans une liste. */
+export interface PostmanRef { id: string; name: string }
+
+/** Dossier d'une collection, avec son chemin depuis la racine (« Users / Admin »). */
+export interface PostmanFolder { id: string; name: string; path: string }
+
+/**
+ * Dossier Postman lié à un worktree : les requêtes de la branche y sont lues, et les propositions de l'agent y sont
+ * écrites après mon accord. folderId null : la racine de la collection.
+ */
+export interface PostmanLink {
+  workspaceId: string | null
+  collectionId: string
+  collectionName: string
+  folderId: string | null
+  /** Chemin du dossier dans la collection ; null à la racine. */
+  folderPath: string | null
+  /** Environnement Postman dont les variables servent à envoyer les requêtes ; absent : aucun. */
+  environmentId?: string | null
+  environmentName?: string | null
+}
+
+/**
+ * Autorisation qui s'applique à une requête : la sienne, ou celle héritée du dossier ou de la collection.
+ * Les valeurs en clair (jeton, mot de passe) sont masquées ; une référence à une variable ({{token}}) reste lisible.
+ */
+export interface PostmanAuthInfo {
+  /** bearer, basic, apikey, oauth2, noauth… */
+  type: string
+  from: 'request' | 'folder' | 'collection' | 'none'
+  /** Nom du dossier ou de la collection qui la porte. */
+  source: string | null
+  fields: PostmanHeader[]
+  /** Shipyard sait l'appliquer à l'envoi (sinon la requête part sans, et la réponse le dit). */
+  supported: boolean
+}
+
+/** Variable utilisée par les requêtes du dossier, et d'où vient sa valeur à l'envoi. */
+export interface PostmanVariable {
+  key: string
+  /** Valeur utilisée, masquée si elle est sensible ; null si aucune source ne la donne. */
+  value: string | null
+  /** local : saisie dans Shipyard (gardée sur ce Mac, jamais envoyée à Postman), prioritaire sur le reste. */
+  source: 'local' | 'environment' | 'collection' | 'missing'
+  secret: boolean
+}
+
+/** Réponse à une requête envoyée depuis Shipyard. */
+export interface PostmanResponse {
+  /** Requête du dossier, ou null pour un brouillon. */
+  requestId: string | null
+  method: string
+  /** Adresse réellement appelée, variables remplacées. */
+  url: string
+  status: number
+  statusText: string
+  timeMs: number
+  size: number
+  headers: PostmanHeader[]
+  body: string
+  /** Corps coupé à l'affichage (réponse trop longue). */
+  truncated: boolean
+  /** Variables restées sans valeur : la requête est partie avec leur nom entre accolades. */
+  unresolved: string[]
+  /** Autorisation appliquée, en clair pour l'œil (« Bearer · collection »), ou pourquoi aucune. */
+  auth: string
+  at: string
+}
+
+export interface PostmanHeader { key: string; value: string }
+
+export type PostmanBodyMode = 'none' | 'raw' | 'urlencoded' | 'formdata' | 'graphql' | 'file'
+
+/** Ce qui décrit une requête, et ce qu'une proposition peut changer. */
+export interface PostmanRequestData {
+  name: string
+  method: string
+  /** Adresse complète, variables ({{baseUrl}}) et paramètres de requête compris. */
+  url: string
+  headers: PostmanHeader[]
+  /** Corps brut (JSON le plus souvent). */
+  body: string | null
+  description: string
+}
+
+export interface PostmanRequest extends PostmanRequestData {
+  id: string
+  /** Sous-dossier, relatif au dossier lié ; vide à sa racine. */
+  folder: string
+  /** Autre que raw : `body` n'est qu'un aperçu, Shipyard ne le réécrit pas. */
+  bodyMode: PostmanBodyMode
+  auth: PostmanAuthInfo
+}
+
+/** Onglet Postman d'un worktree. */
+export interface PostmanState {
+  configured: boolean
+  link: PostmanLink | null
+  requests: PostmanRequest[]
+  /** Sous-dossiers du dossier lié (chemins relatifs). */
+  folders: string[]
+  /** Autorisation du dossier lié : celle qu'hérite une requête qui n'a pas la sienne, et un brouillon. */
+  auth: PostmanAuthInfo
+  /** Variables que les requêtes du dossier utilisent, plus celles saisies dans Shipyard. */
+  variables: PostmanVariable[]
+  /** Dernière réponse de chaque requête envoyée depuis Shipyard (gardée jusqu'au redémarrage du serveur). */
+  responses: PostmanResponse[]
+  /** Le lien ne se lit plus (dossier supprimé, clé sans accès…). */
+  error: string | null
+}
+
+/**
+ * Changement proposé par l'agent dans le dossier lié. create : `folder` est le sous-dossier (créé au besoin).
+ * update et delete : `requestId` désigne la requête ; en update, body null garde le corps actuel, vide le retire.
+ */
+export interface PostmanOperation extends PostmanRequestData {
+  op: 'create' | 'update' | 'delete'
+  requestId: string | null
+  folder: string
+  /** D'où vient le changement : la route dans le code, ce qui a changé. */
+  reason: string
+}
+
+export interface PostmanOutput {
+  /** La réponse en bref : ce qui est proposé, ou la réponse à la question. */
+  summary: string
+  /** Markdown : hypothèses, ce qui n'a pas pu être établi, réponse détaillée. Vide si rien à ajouter. */
+  details: string
+  operations: PostmanOperation[]
+  /** Fichiers lus qui fondent les propositions. */
+  files: string[]
+}
+
+/** Proposition déjà écrite dans Postman (son rang dans `operations`) : elle ne se rejoue pas. */
+export interface PostmanApplied { index: number; requestId: string | null }
+
 /**
  * Paquet npm privé publié sur GitHub Packages par un autre dépôt (ex. @acme/sdk, publié par app) :
  * la version figée par la branche, la dernière publiée, et ce que le dépôt source n'a pas encore publié.
@@ -603,6 +750,10 @@ export interface ActionInput {
   ref?: string
   extra?: string
   ticketId?: string
+  /** Postman : l'agent peut envoyer lui-même les requêtes du dossier (elles partent vraiment vers l'API visée). */
+  runCalls?: boolean
+  /** Pre-check de plusieurs tickets faits ensemble : ceux qui s'ajoutent à `ticketId`. */
+  extraTickets?: string[]
   finding?: Finding
   /** Auto-review : les remarques acceptées, corrigées ensemble par un seul agent. */
   findings?: Finding[]
@@ -612,6 +763,8 @@ export interface ActionInput {
   action?: string
   job?: { id: string; name: string; workflow: string | null; jobId: string | null }
   commits?: { title: string; files: string[]; project?: string }[]
+  /** Commits : fichiers écartés du plan dont j'ai choisi d'annuler les modifications (les autres restent en local). */
+  discard?: string[]
   feedback?: string
   previousRunId?: string
   planRunId?: string
@@ -656,7 +809,9 @@ export type ActionKind =
   | 'branch-name'
   | 'ticket-draft'
   | 'precheck'
+  | 'quick-change'
   | 'quick-tickets'
+  | 'ticket-ask'
   | 'daily'
   | 'conflict-resolve'
   | 'merge-finish'
@@ -692,6 +847,7 @@ export type ActionKind =
   | 'ci-fix-all'
   | 'sdk-update'
   | 'sdk-publish'
+  | 'postman'
   | 'hook-fix'
   | 'checks-fix'
   | 'ci-analyze'
@@ -747,6 +903,32 @@ export interface QuickPick {
   approach: string
   files: string[]
   risk: string
+  /** Tickets que celui-ci bloque dans Linear, avec leur statut : le faire les débloque (ajouté par le serveur). */
+  unblocks?: string[]
+}
+
+/** Réponse à une question sur un ticket de « Tickets rapides », d'après le ticket et le code, sans rien modifier. */
+export interface TicketAskOutput {
+  /** La réponse en bref, 1 à 3 phrases. */
+  summary: string
+  /** Le détail, par partie : un titre court et un corps en Markdown. */
+  sections: { title: string; body: string }[]
+  /** Fichiers lus qui fondent la réponse. */
+  files: string[]
+}
+
+/** Ticket examiné mais pas retenu par l'agent : pourquoi, et ce qu'il attend. Je peux le prendre quand même. */
+export interface QuickSkipped {
+  id: string
+  /** blocked : il attend un autre ticket, une décision ou une réponse ; long : trop long face aux autres ; unclear : besoin trop flou. */
+  kind: 'blocked' | 'long' | 'unclear'
+  reason: string
+  /** Tickets pas terminés qu'il attend (identifiants), vide sinon. */
+  waitsFor: string[]
+  /** Titre, lien et priorité du ticket : ajoutés par le serveur d'après Linear. */
+  title?: string
+  url?: string
+  priority?: string
 }
 
 export interface QuickTicketsOutput {
@@ -755,6 +937,10 @@ export interface QuickTicketsOutput {
   examined: number
   /** Du plus rapide au moins rapide. */
   picks: QuickPick[]
+  /** Tickets examinés mais pas retenus, avec la raison. Absent des sélections d'avant cette liste. */
+  skipped?: QuickSkipped[]
+  /** Tickets écartés avant l'analyse : bloqués dans Linear par un ticket qui n'est pas terminé (ajouté par le serveur). */
+  blocked?: { id: string; title: string; url: string; priority?: string; by: string[] }[]
 }
 
 /** Proposition de l'analyse « Features & optimisations ». */
@@ -1017,6 +1203,11 @@ export interface TicketWorkOutput {
   summary: string
   changes: { file: string; change: string }[]
   checks: { name: string; status: 'pass' | 'fail' | 'skip'; detail: string }[]
+  /**
+   * Preuves que ça fonctionne : la sortie réelle d'une commande (tests cas par cas, appel d'API, script), avec les
+   * valeurs attendues et obtenues. Indispensable quand le changement n'a rien à montrer à l'écran. Absent des anciens comptes rendus.
+   */
+  proofs?: { title: string; command: string; output: string }[]
   /** Fichiers d'image relatifs au dossier de captures du run (null si la capture n'a pas pu être faite). */
   screenshots: { name: string; platform?: 'web' | 'android'; description: string; before: string | null; after: string | null }[]
   appNote: string
@@ -1055,6 +1246,8 @@ export interface CommitExecOutput {
   results: CommitExecResult[]
   pushed: number
   failed: number
+  /** Fichiers écartés dont les modifications ont été annulées, à ma demande. */
+  discarded?: string[]
 }
 
 export interface PrPrepareOutput {
@@ -1369,6 +1562,8 @@ export interface Credentials {
   linear: { configured: boolean; hint: string | null; user: string | null }
   /** token : jeton saisi dans les réglages (GH_TOKEN) ; gh : la connexion de `gh auth login`. */
   github: { source: 'token' | 'gh'; hint: string | null; login: string | null }
+  /** Facultatif : la clé ajoute l'onglet Postman aux worktrees. */
+  postman: { configured: boolean; hint: string | null; user: string | null }
   /** Claude Code, qui fait tourner les agents (claude -p) sur l'abonnement. */
   claude: { installed: boolean; version: string | null; loggedIn: boolean; method: string | null; email: string | null; org: string | null; plan: string | null }
 }

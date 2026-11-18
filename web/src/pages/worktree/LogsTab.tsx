@@ -16,6 +16,7 @@ const KIND: Partial<Record<ActionKind, string>> = {
   review: 'Review', 'review-part': 'Review (lot)', test: 'Test', 'test-part': 'Test (un dépôt)', 'test-ask': 'Question sur le test', 'ci-analyze': 'Diagnostic CI', 'ci-fix': 'Correctif CI',
   'commit-plan': 'Plan de commits', 'commit-exec': 'Commits', 'commit-fix': 'Correction de hook',
   'conflict-resolve': 'Résolution de conflits', 'merge-finish': 'Valider et pousser', 'base-sync': 'Récupérer la base', 'branch-sync': 'Récupérer ma branche',
+  postman: 'Postman',
 }
 
 type Filter = 'all' | 'error' | 'running'

@@ -40,6 +40,7 @@ In changes mode (a change request is provided above), don't redo the "before" sc
 - Follow the plan step by step (TodoWrite). If you have to deviate from it, say why in the audit.
 - Follow the project's patterns and conventions, and above all the team dev rules below. They are mandatory for any code you write or modify, and they are exactly the ones the PR review applies. They only apply to the areas they specify (a web rule does not apply to mobile, and vice versa). If the approved plan contradicts a rule, apply the rule and flag the deviation in the audit.
 - Before writing a component, hook, type or constant, check whether it already exists (Grep) and reuse it.
+- Prove that it works. Code with logic gets tests in the project's test setup, covering the cases of the request and its edge cases (a calculation: the worked examples given, the thresholds, the empty and zero cases). Run them, read the output, and keep it: it goes in the audit as proof.
 - Run the lint, typecheck and tests related to your change, then fix what breaks.
 - Once the code is done, reread your own diff (`git diff`, untracked files included) rule by rule, audit checklist included, as a demanding reviewer would. Fix every deviation found, then rerun lint and typecheck.
 - Do not commit or push: never run git add, git commit, git push, or any command that discards changes. The user reviews, then commits from Shipyard.
@@ -56,6 +57,13 @@ Return a complete and honest audit via StructuredOutput:
 - summary: what was done, in 3 to 5 sentences;
 - changes: each file modified or created, with what changes;
 - checks: each check performed (lint, typecheck, tests, visual check), with pass, fail or skip and the detail. Add a check named "Règles de dev": pass if your diff follows all of them, otherwise fail with each remaining deviation and its reason;
+- proofs: the evidence that it works, as real command output the user can read without rerunning anything. One entry per thing proven: title, command (as typed) and output (copied as is, never rewritten or summarized, the useful lines only, 60 at most).
+  - Logic with no visible effect (a calculation, a rule, a parser, an API, a job, a migration) always has at least one proof: the screenshots cannot show it works, so the output must.
+  - Run the tests with the reporter that lists every case (verbose), so each case appears by name with its result, not only "11 pass".
+  - When the change produces values (amounts, rates, dates, counts, a status), the output shows them: for each case the input, the expected value and the value obtained. If the test runner does not print them, add them to the test names or run a short script that prints the table, and give that output.
+  - An API or a command is proven by calling it: the request and the response.
+  - An output you typed yourself is not a proof. Never write the expected and obtained values by hand, never describe what a command would print: if no command you ran printed these values, run one that does (a short script calling the code, printing one line per case) and copy what it printed. command is the exact command, complete enough to be rerun.
+  - Empty only when the change is purely visual and the screenshots prove it.
 - screenshots: for each screen, name, platform (web or android), description, before and after (file names, or null if the screenshot is missing);
 - appNote: how the app was started, or why it could not be;
 - risks: what remains fragile or could not be verified;

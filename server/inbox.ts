@@ -79,12 +79,14 @@ async function awaiting(run: RunRecord, runs: RunRecord[], repo?: string): Promi
       const answered = !!run.note && !!(out as TicketPlanOutput | null)?.reply
       return { title: answered ? 'Plan : réponse à ton message' : 'Plan prêt à valider', detail: q ? `${q} question(s) à trancher` : null, tone: 'blue', until: 'disparaît quand tu lances le travail' }
     }
+    case 'quick-change':
     case 'precheck': {
       if (run.decision) return null
       const p = out as PrecheckOutput | null
       const answered = !!run.note && !!p?.reply
       const q = p?.questions.length ?? 0
-      return { title: answered ? 'Pre-check : réponse à ton message' : 'Pre-check prêt : à approuver', detail: p ? `${p.estimate.size} · ${p.estimate.effort}${q ? ` · ${q} question(s)` : ''}` : null, tone: p?.feasibility.verdict === 'bloqué' ? 'red' : 'blue', until: 'disparaît quand tu approuves' }
+      const what = run.kind === 'quick-change' ? 'Modification rapide' : 'Pre-check'
+      return { title: answered ? `${what} : réponse à ton message` : run.kind === 'quick-change' ? 'Modification rapide : plan à approuver' : 'Pre-check prêt : à approuver', detail: p ? `${p.estimate.size} · ${p.estimate.effort}${q ? ` · ${q} question(s)` : ''}` : null, tone: p?.feasibility.verdict === 'bloqué' ? 'red' : 'blue', until: 'disparaît quand tu approuves' }
     }
     case 'ticket':
     case 'change':

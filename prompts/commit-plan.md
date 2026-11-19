@@ -15,7 +15,13 @@ Repo state (provided by Shipyard):
 
 Rules:
 1. Analyze each modified or new file, and open the diff if the name isn't enough to understand the change.
-2. Group the files into logical commits, one intent per commit. Keep code, its tests and its translations together when they belong together. Order the commits so that each one stays consistent on its own (types and SDK before their usages).
+2. Group the files into logical commits, one intent per commit, and split finely: I review and revert commit by commit, so a commit should be small enough to read in one go.
+   - One commit per feature slice, fix, refactor, migration, dependency or config change. Don't merge two of them because they serve the same ticket.
+   - Split a large feature by layer or step when each part stands on its own: database schema and migration, then the API module, then the SDK or shared types, then each screen or component, then docs.
+   - Separate what is unrelated to the main change (renames, formatting, drive-by fixes, tooling) into its own commits.
+   - As a guide, a commit rarely needs more than about 10 files. Above that, look for a second intent before keeping it whole. A mechanical change repeated across many files (rename, codemod, generated translations) is the exception and stays in one commit.
+   - Don't split below what works: keep code with its tests and its translations, and never separate files that only compile or pass together.
+   - Order the commits so that each one stays consistent on its own (types and SDK before their usages).
 3. Commit title:
    - a single line, without description or body;
    - in English, short and technical;

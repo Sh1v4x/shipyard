@@ -215,8 +215,10 @@ async function loadOverview(project: Project, force: boolean): Promise<ProjectOv
       continue
     }
     const done = closed.get(wt.branch)
-    // Ma PR de cette branche est mergée, ou fermée sans merge : dans les deux cas le worktree n'a plus d'objet.
-    if (done) wt.merged = { number: done.number, title: done.title, url: done.url, mergedAt: done.mergedAt, state: done.state }
+    // Ma PR de cette branche est mergée : le worktree n'a plus d'objet. Fermée sans merge : rien n'est livré, le worktree
+    // redevient une branche sans PR (on peut encore la tester, l'analyser et rouvrir une PR).
+    if (done?.state === 'CLOSED') wt.closedPr = { number: done.number, title: done.title, url: done.url }
+    else if (done) wt.merged = { number: done.number, title: done.title, url: done.url, mergedAt: done.mergedAt, state: done.state }
   }
   // Tickets associés à la main : une fois le ticket principal connu (branche, lien ou PR), il n'y figure pas en double.
   const extraLinks = extraTicketLinks()

@@ -65,8 +65,13 @@ export interface Worktree {
   prNumber: number | null
   kind: WorktreeKind
   /** Ma PR de cette branche, mergée : le worktree attend d'être abouti (ticket en Done, worktree supprimé). */
-  /** state CLOSED : PR fermée sans merge (la mienne, ou celle d'une review abandonnée). Absent : mergée. */
+  /** state CLOSED : PR d'une review fermée sans merge (review abandonnée). Absent : mergée. */
   merged?: { number: number; title: string; url: string; mergedAt: string | null; state?: 'MERGED' | 'CLOSED' } | null
+  /**
+   * Ma PR de cette branche, fermée sans merge : rien n'a été livré, le worktree reste une branche sans PR
+   * (tests, auto-review, nouvelle PR). Sert seulement à le rappeler.
+   */
+  closedPr?: { number: number; title: string; url: string } | null
   /** Worktrees d'autres projets du groupe associés à celui-ci (même feature, même review). */
   links?: WorktreeLink[]
   /** Ticket local (proposition gardée sur le Mac, sans ticket Linear) : sert de description au plan et au travail. */

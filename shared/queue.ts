@@ -103,9 +103,8 @@ export function buildQueue(ov: Omit<ProjectOverview, 'queue' | 'ghosts'>, rules:
         key: `wt:${w.id}`, group: 'clean', tone: 'gray', kind: review ? 'review' : 'mine', title: w.merged.title, ref: `#${w.merged.number}`, worktree: w.id, prNumber: w.merged.number, ticketId: w.ticketId,
         reasons: [{ label: w.merged.state === 'CLOSED' ? 'Fermée' : 'Mergée', tone: 'purple' }],
         detail: review ? 'Review terminée : le worktree peut être supprimé'
-          : w.merged.state === 'CLOSED' ? 'PR fermée sans merge : le worktree peut être supprimé'
           : `${w.ticketId ? `Passer ${worktreeTicketIds(w).join(' et ')} en Done, ` : ''}supprimer le worktree`,
-        action: { label: review || w.merged.state === 'CLOSED' ? 'Supprimer' : 'Aboutir' }, since: w.merged.mergedAt,
+        action: { label: review ? 'Supprimer' : 'Aboutir' }, since: w.merged.mergedAt,
       })
       continue
     }
@@ -121,7 +120,8 @@ export function buildQueue(ov: Omit<ProjectOverview, 'queue' | 'ghosts'>, rules:
     }
     items.push({
       key: `wt:${w.id}`, group: 'progress', tone: 'blue', kind: 'branch', title, ref: t?.id ?? null, worktree: w.id, prNumber: null, ticketId: w.ticketId,
-      reasons: [w.localTicket ? { label: 'Ticket local', tone: 'gray' } : t ? { label: t.status, tone: 'gray' } : { label: 'Sans ticket', tone: 'gray' }],
+      // Ma PR fermée sans merge : le travail continue, une nouvelle PR reste possible.
+      reasons: [w.localTicket ? { label: 'Ticket local', tone: 'gray' } : t ? { label: t.status, tone: 'gray' } : { label: 'Sans ticket', tone: 'gray' }, ...(w.closedPr ? [{ label: `PR #${w.closedPr.number} fermée`, tone: 'amber' as const }] : [])],
       detail: w.branch, action: { label: 'Continuer', tab: 'ticket' }, since: null,
     })
   }

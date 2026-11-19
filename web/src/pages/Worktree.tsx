@@ -157,6 +157,7 @@ export function WorktreePage({ project, wtId, tab }: { project: Project; wtId: s
       {history && pr && <PrTimeline pr={pr} />}
 
       {w.merged && <FinishBanner project={project} wtId={wtId} merged={w.merged} ticketId={worktreeTicketIds(w).join(' et ') || null} many={worktreeTicketIds(w).length > 1} dirty={d.dirtyFiles.length} review={w.kind === 'review'} />}
+      {w.closedPr && !pr && !w.merged && <ClosedPrNotice project={project} wtId={wtId} closed={w.closedPr} dirty={d.dirtyFiles.length} onCreate={() => goTo('ticket')} />}
       {next && (
         <div className={cn('flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border px-4 py-3', NEXT_TONE[next.tone])}>
           <div className="min-w-0 flex-1">
@@ -415,6 +416,41 @@ export interface TabProps {
   wtId: string
 }
 
+/**
+ * Ma PR fermée sans merge : rien n'a été livré, le worktree reste une branche sans PR. On peut encore la tester,
+ * l'analyser et créer une nouvelle PR ; le supprimer reste possible, la branche est conservée.
+ */
+function ClosedPrNotice({ project, wtId, closed, dirty, onCreate }: { project: Project; wtId: string; closed: NonNullable<Worktree['closedPr']>; dirty: number; onCreate: () => void }) {
+  const remove = useRemoveWorktree(project.id)
+  const toast = useToast()
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4">
+      <div className="flex min-w-0 flex-1 gap-3">
+        <GitPullRequestClosedIcon className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <div className="min-w-0">
+          <p className="font-medium text-amber-800 dark:text-amber-300">
+            <a href={closed.url} target="_blank" rel="noreferrer" className="hover:underline">PR #{closed.number}</a> fermée sans merge
+          </p>
+          <p className="mt-0.5 text-sm text-muted-foreground">Rien n’a été livré et le ticket garde son statut. Tu peux continuer à tester la branche, l’analyser avec l’IA et créer une nouvelle PR.</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={onCreate}>Créer une nouvelle PR</Button>
+        <Button size="sm" variant="outline" disabled={remove.isPending || dirty > 0} title={dirty ? `Il reste ${plural(dirty, 'fichier non commité', 'fichiers non commités')} : commite-les ou annule-les avant de supprimer le worktree.` : 'La branche est conservée.'} onClick={() => {
+          if (!confirm(`Supprimer ce worktree ? La PR #${closed.number} est fermée sans merge : la branche est conservée.`)) return
+          remove.mutate(wtId, {
+            onSuccess: () => {
+              toast('Worktree supprimé')
+              go({ page: 'overview', project: project.id })
+            },
+            onError: (e) => toast(e.message, true),
+          })
+        }}>{remove.isPending ? <Spinner /> : <Trash2Icon />}Supprimer le worktree</Button>
+      </div>
+    </div>
+  )
+}
+
 /** Ma PR est mergée : « Aboutir le projet » passe le ticket (et ses tickets associés) en Done et supprime le worktree. */
 function FinishBanner({ project, wtId, merged, ticketId, many, dirty, review }: { project: Project; wtId: string; merged: NonNullable<Worktree['merged']>; ticketId: string | null; many: boolean; dirty: number; review: boolean }) {
   const finish = useFinishWorktree(project.id)
@@ -439,36 +475,6 @@ function FinishBanner({ project, wtId, merged, ticketId, many, dirty, review }: 
         </div>
         <Button size="sm" disabled={remove.isPending || dirty > 0} onClick={() => {
           if (!confirm('Supprimer ce worktree de review ?')) return
-          remove.mutate(wtId, {
-            onSuccess: () => {
-              toast('Worktree supprimé')
-              go({ page: 'overview', project: project.id })
-            },
-            onError: (e) => toast(e.message, true),
-          })
-        }}>{remove.isPending ? <Spinner /> : <Trash2Icon />}Supprimer le worktree</Button>
-      </div>
-    )
-  }
-  // Ma PR fermée sans merge : rien n'a été livré, le ticket garde son statut ; seul le worktree se supprime.
-  if (closed) {
-    return (
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4">
-        <div className="flex min-w-0 flex-1 gap-3">
-          <GitPullRequestClosedIcon className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-          <div className="min-w-0">
-            <p className="font-medium text-amber-800 dark:text-amber-300">
-              <a href={merged.url} target="_blank" rel="noreferrer" className="hover:underline">PR #{merged.number}</a> fermée sans merge
-            </p>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              {dirty
-                ? `Il reste ${plural(dirty, 'fichier non commité', 'fichiers non commités')} : commite-les ou annule-les avant de supprimer le worktree.`
-                : `Le worktree peut être supprimé. La branche est conservée${ticketId ? `, et ${many ? `les tickets ${ticketId} gardent leur statut` : `le ticket ${ticketId} garde son statut`}` : ''}. Pour reprendre le travail, rouvre la PR sur GitHub.`}
-            </p>
-          </div>
-        </div>
-        <Button size="sm" disabled={remove.isPending || dirty > 0} onClick={() => {
-          if (!confirm(`Supprimer ce worktree ? La PR #${merged.number} est fermée sans merge : la branche est conservée.`)) return
           remove.mutate(wtId, {
             onSuccess: () => {
               toast('Worktree supprimé')
